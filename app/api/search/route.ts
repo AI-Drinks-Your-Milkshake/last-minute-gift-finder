@@ -46,8 +46,9 @@ export async function POST(request: NextRequest) {
       interests: interests.trim(),
     });
 
-    // Fire-and-forget — don't block the response on KV write
-    addRecentSearch({
+    // Await the KV write — fire-and-forget is unreliable in serverless
+    // (the function terminates before the async write completes)
+    await addRecentSearch({
       recipient: recipient.trim(),
       occasion: occasion.trim(),
       timestamp: Date.now(),
