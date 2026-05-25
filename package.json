@@ -12,7 +12,7 @@
     "next": "^14.2.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "openai": "^4.52.7",
+    "@anthropic-ai/sdk": "^0.32.0",
     "@vercel/kv": "^2.0.0"
   },
   "devDependencies": {

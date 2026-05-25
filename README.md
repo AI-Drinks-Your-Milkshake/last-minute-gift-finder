@@ -3,7 +3,7 @@
 An AI-powered gift recommendation tool. Enter a recipient's age, the occasion, and a few words about their interests — get 5–8 specific, thoughtful gift ideas in seconds, each with an Amazon search link.
 
 **Live features:**
-- Tailored gift ideas from GPT-4o mini
+- Tailored gift ideas from Claude Haiku 4.5
 - Site-wide "recent searches" panel (last 20, stored in Vercel KV)
 - IP-based rate limiting: 5 searches per day per visitor
 - Optional Amazon Associates affiliate links
@@ -15,7 +15,7 @@ An AI-powered gift recommendation tool. Enter a recipient's age, the occasion, a
 | Layer | Tool |
 |---|---|
 | Framework | Next.js 14 (App Router) |
-| AI | OpenAI `gpt-4o-mini` |
+| AI | Anthropic `claude-haiku-4-5` |
 | Storage / Rate limiting | Vercel KV (Upstash Redis) |
 | Styling | Tailwind CSS |
 | Deployment | Vercel |
@@ -25,7 +25,7 @@ An AI-powered gift recommendation tool. Enter a recipient's age, the occasion, a
 ## Prerequisites
 
 - **Node.js 18+**
-- An **OpenAI account** with API access — [platform.openai.com](https://platform.openai.com)
+- An **Anthropic account** with API access — [console.anthropic.com](https://console.anthropic.com)
 - A **Vercel account** for deployment (free tier works) — [vercel.com](https://vercel.com)
 
 ---
@@ -64,11 +64,11 @@ Open [http://localhost:3000](http://localhost:3000).
 
 All variables are documented in `.env.local.example`. Here's the full breakdown:
 
-### `OPENAI_API_KEY` — required
+### `ANTHROPIC_API_KEY` — required
 
-Your OpenAI secret key. Get one at [platform.openai.com/api-keys](https://platform.openai.com/api-keys).
+Your Anthropic secret key. Get one at [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys).
 
-**Cost estimate:** `gpt-4o-mini` is very inexpensive. Each gift search costs roughly **$0.001–$0.003** depending on how detailed the interests field is.
+**Cost estimate:** `claude-haiku-4-5` is inexpensive. Each gift search costs roughly **$0.01–$0.02** depending on how detailed the interests field is (input $1/M tokens, output $5/M tokens).
 
 ---
 
@@ -123,7 +123,7 @@ Sign up at [affiliate-program.amazon.com](https://affiliate-program.amazon.com/)
 
 4. **Add the remaining env vars:**
    - In Vercel: **Settings** → **Environment Variables**
-   - Add `OPENAI_API_KEY`
+   - Add `ANTHROPIC_API_KEY`
    - Optionally add `NEXT_PUBLIC_AMAZON_AFFILIATE_TAG`
 
 5. **Redeploy:**
@@ -144,7 +144,7 @@ app/
 ├── page.tsx                       Client component: form + results + sidebar
 ├── globals.css                    Tailwind imports
 └── api/
-    ├── search/route.ts            POST: rate-limit → OpenAI → store search
+    ├── search/route.ts            POST: rate-limit → Anthropic → store search
     └── recent-searches/route.ts   GET: last 20 searches from KV
 
 components/
@@ -153,7 +153,7 @@ components/
 └── RecentSearches.tsx             Sidebar panel, polls /api/recent-searches
 
 lib/
-├── openai.ts                      OpenAI client, system + user prompt
+├── anthropic.ts                   Anthropic client, system + user prompt
 ├── kv.ts                          addRecentSearch / getRecentSearches (lpush + ltrim)
 └── rate-limit.ts                  checkRateLimit (incr + expire), getClientIp
 
@@ -189,7 +189,7 @@ addRecentSearch(entry)
 
 - The app fails open on KV errors: if rate limiting or KV storage throws, the search still completes
 - `NEXT_PUBLIC_AMAZON_AFFILIATE_TAG` is safe to expose client-side — it's just a referral tag, not a secret
-- The `response_format: { type: "json_object" }` param on the OpenAI call guarantees valid JSON output
+- We prefill the assistant turn with `{` so Claude is forced to continue with a JSON object — then we prepend `{` before `JSON.parse`. This is the Anthropic-recommended pattern for reliable JSON output.
 - Recent searches refresh automatically after each successful search (via `refreshKey` prop on the sidebar)
 
 ---

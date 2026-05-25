@@ -1,9 +1,11 @@
-import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 import type { GiftTheme, GiftIdea } from '@/types';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
 });
+
+const MODEL = 'claude-haiku-4-5';
 
 type Level = 'casual' | 'interested' | 'enthusiast';
 
@@ -104,36 +106,43 @@ Return a JSON object with a "themes" key containing an array of EXACTLY 3 object
   - "searchTerms": 3–6 words optimized for Amazon product search
   - "emoji": single emoji for the gift category — choose the most fitting: 🎮 gaming, 📚 books, 🏃 fitness, 🎨 art/creative, 🍳 cooking, 🎵 music, 🌿 wellness, 🧳 travel, 💎 jewelry/luxury, 🔧 tech/tools, 🎭 entertainment, 👗 fashion, 🏠 home, 🍷 food/drink, 🧘 mindfulness, 🐾 pets, 🌱 outdoors, 🎲 games/fun
 
-Think like a thoughtful friend who knows this ${params.recipient} well. Pick gifts that feel curated and genuinely exciting, not safe or obvious. Avoid gift cards, generic flowers, or candles unless interests explicitly demand them.`;
+Think like a thoughtful friend who knows this ${params.recipient} well. Pick gifts that feel curated and genuinely exciting, not safe or obvious. Avoid gift cards, generic flowers, or candles unless interests explicitly demand them.
 
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ],
-    temperature: 0.85,
+Respond with ONLY the JSON object. Start your response with { and end with }. No prose, no markdown fences.`;
+
+  const response = await anthropic.messages.create({
+    model: MODEL,
     max_tokens: 4000,
-    response_format: { type: 'json_object' },
+    temperature: 0.85,
+    system: systemPrompt,
+    messages: [
+      { role: 'user', content: userPrompt },
+      // Prefill the assistant turn with `{` to force a JSON-object response.
+      // The model continues from this prefix, so we prepend `{` before parsing.
+      { role: 'assistant', content: '{' },
+    ],
   });
 
-  const content = response.choices[0]?.message?.content;
-  if (!content) throw new Error('Empty response from OpenAI');
+  const first = response.content[0];
+  if (!first || first.type !== 'text') {
+    throw new Error('Empty or non-text response from Anthropic');
+  }
+  const content = '{' + first.text;
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
   } catch {
-    throw new Error('OpenAI returned invalid JSON');
+    throw new Error('Anthropic returned invalid JSON');
   }
 
   if (!parsed || typeof parsed !== 'object') {
-    throw new Error('OpenAI response is not an object');
+    throw new Error('Anthropic response is not an object');
   }
 
   const themesRaw = (parsed as { themes?: unknown }).themes;
   if (!Array.isArray(themesRaw) || themesRaw.length !== 3) {
-    throw new Error('OpenAI response must contain exactly 3 themes');
+    throw new Error('Anthropic response must contain exactly 3 themes');
   }
 
   if (!themesRaw.every(isValidTheme)) {

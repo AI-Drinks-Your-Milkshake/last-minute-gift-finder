@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getGiftIdeas } from '@/lib/openai';
+import { getGiftIdeas } from '@/lib/anthropic';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { addRecentSearch } from '@/lib/kv';
 
