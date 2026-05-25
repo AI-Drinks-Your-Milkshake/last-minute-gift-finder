@@ -6,6 +6,9 @@ export interface GiftIdea {
   priceMax: number;     // numeric upper bound for filtering
   searchTerms: string;
   emoji: string;
+  // Populated server-side after Claude returns, via Brave Image Search.
+  // null = lookup ran but found nothing or failed; undefined = enrichment not yet run.
+  imageUrl?: string | null;
 }
 
 export interface GiftTheme {
@@ -40,4 +43,9 @@ export interface RecentSearch {
   recipient: string;
   occasion: string;
   timestamp: number;
+}
+
+export interface BetaSignup {
+  email: string;
+  ts:    number;   // ms epoch — when the signup landed
 }

@@ -97,6 +97,21 @@ Sign up at [affiliate-program.amazon.com](https://affiliate-program.amazon.com/)
 
 ---
 
+### `BRAVE_API_KEY` — optional (but recommended)
+
+API key for [Brave Search](https://api-dashboard.search.brave.com/). When set, every gift card is enriched with a real product image found via Brave Image Search. The flow per gift:
+
+1. Brave Image Search by the gift's `searchTerms`
+2. Score top results — demote Pinterest/Etsy/eBay listings, prefer manufacturer / major-retailer product pages
+3. Fetch the winning page's HTML and pull `<meta property="og:image">` for a higher-quality hero shot
+4. Cache the URL in Vercel KV (no expiry — product photos don't meaningfully change)
+
+**Cost:** Brave charges ~$4–5 per 1,000 image queries. A first-time search of 9 gifts costs ~$0.04; repeat queries hit the cache and cost nothing. There's no free tier, but $5 in prepaid credits lasts a long time at low volume.
+
+**Without this key,** the app still works — cards fall back to emoji-only and skip the image lookup entirely.
+
+---
+
 ## Deploy to Vercel
 
 ### One-click GitHub flow

@@ -1,3 +1,6 @@
+'use client';
+
+import { useState } from 'react';
 import type { GiftIdea } from '@/types';
 
 interface Props {
@@ -33,9 +36,14 @@ export default function GiftCard({ gift }: Props) {
   const tier = getPriceTier(gift.priceRange);
   const { label, bg, color } = BADGE[tier];
 
+  // Image fallback state: if the URL fails to load (CDN gone, hotlink blocked,
+  // 404, etc.) we drop back to the emoji-only header.
+  const [imageBroken, setImageBroken] = useState(false);
+  const showImage = Boolean(gift.imageUrl) && !imageBroken;
+
   return (
     <div
-      className="group flex flex-col rounded-2xl transition-all duration-200 hover:-translate-y-1"
+      className="group flex flex-col overflow-hidden rounded-2xl transition-all duration-200 hover:-translate-y-1"
       style={{
         backgroundColor: 'var(--surface-card)',
         border: '1px solid var(--border-raise)',
@@ -49,10 +57,31 @@ export default function GiftCard({ gift }: Props) {
         (e.currentTarget as HTMLDivElement).style.boxShadow = '0 2px 12px rgba(0,0,0,0.35)';
       }}
     >
+      {/* Product image header — only renders when we have a URL that loads.
+          White background + contain so dark product photos don't look weird on
+          the dark theme, and tall/wide products both display correctly. */}
+      {showImage && (
+        <div
+          className="flex items-center justify-center bg-white"
+          style={{ aspectRatio: '4 / 3' }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={gift.imageUrl as string}
+            alt={gift.title}
+            loading="lazy"
+            onError={() => setImageBroken(true)}
+            style={{ maxWidth: '90%', maxHeight: '90%', objectFit: 'contain' }}
+          />
+        </div>
+      )}
+
       {/* Body */}
       <div className="flex flex-1 flex-col items-center p-6 text-center">
-        {/* Category emoji */}
-        <div className="mb-4 text-5xl leading-none select-none">{gift.emoji || '🎁'}</div>
+        {/* Category emoji — only shown when no product image is available */}
+        {!showImage && (
+          <div className="mb-4 text-5xl leading-none select-none">{gift.emoji || '🎁'}</div>
+        )}
 
         {/* Title */}
         <h3

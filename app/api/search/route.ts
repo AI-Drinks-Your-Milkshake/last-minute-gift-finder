@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getGiftIdeas } from '@/lib/anthropic';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { addRecentSearch } from '@/lib/kv';
+import { enrichThemesWithImages } from '@/lib/product-images';
 
 const VALID_COUNTS = [6, 9, 12] as const;
 const VALID_LEVELS = ['casual', 'interested', 'enthusiast'] as const;
@@ -78,6 +79,12 @@ export async function POST(request: NextRequest) {
       priceMax,
       level: level as Level,
     });
+
+    // Enrich each gift with a product image URL via Brave Image Search +
+    // og:image second hop, cached in KV. Mutates themes in place. Never
+    // throws — failed lookups leave imageUrl as null so the UI falls back
+    // to the emoji-only card.
+    await enrichThemesWithImages(themes);
 
     // Await the KV write — fire-and-forget is unreliable in serverless
     // (the function terminates before the async write completes)

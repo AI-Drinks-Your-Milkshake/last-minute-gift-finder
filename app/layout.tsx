@@ -5,10 +5,10 @@ import './globals.css';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Gift Finder',
+  title: 'Strix',
   description: 'AI-powered gift ideas tailored to any person, any occasion — in seconds.',
   openGraph: {
-    title: 'Gift Finder',
+    title: 'Strix',
     description: 'AI-powered gift ideas tailored to any person, any occasion — in seconds.',
     type: 'website',
   },

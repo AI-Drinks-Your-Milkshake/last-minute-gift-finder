@@ -41,6 +41,8 @@ const COUNT_MAX  = 15;
 const COUNT_STEP = 3;
 const STEP_NAMES = ['Who', 'Age', 'Occasion', 'About them', 'Adventurousness'];
 
+const TAGLINE = 'Strix. n. Owl genus. Large eyes, binocular vision, sharp in the dark.';
+
 type WizardStep = 0 | 1 | 2 | 3 | 4 | 5 | 'loading' | 'results';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -90,7 +92,6 @@ export default function GiftFinderWizard() {
   const [error,          setError]          = useState<string | null>(null);
   const [resultForm,     setResultForm]     = useState<SearchFormData>(DEFAULT_FORM);
   const [refreshing,     setRefreshing]     = useState(false);
-  // Track what was last sent to the API so we know when a re-fetch is needed
   const [committedLevel, setCommittedLevel] = useState<SearchFormData['level']>('interested');
   const [committedCount, setCommittedCount] = useState<number>(9);
 
@@ -110,7 +111,6 @@ export default function GiftFinderWizard() {
     setResultForm(prev => ({ ...prev, priceMax: Math.min(PRICE_MAX, v) }));
   }
 
-  // Change 6: "New search" goes to step 1, not landing
   function resetSearch() {
     setForm(DEFAULT_FORM);
     setThemes([]);
@@ -163,7 +163,7 @@ export default function GiftFinderWizard() {
         body:    JSON.stringify(apiBody),
       });
       const data = await res.json();
-      if (!res.ok) return; // silently keep old results on error
+      if (!res.ok) return;
       setThemes(data.themes);
       setCommittedLevel(resultForm.level);
       setCommittedCount(resultForm.count);
@@ -172,7 +172,6 @@ export default function GiftFinderWizard() {
     }
   }
 
-  // Show refresh button when depth or count differs from last API call
   const needsRefresh = resultForm.level !== committedLevel || resultForm.count !== committedCount;
 
   // ── Filtered results ──
@@ -207,7 +206,6 @@ export default function GiftFinderWizard() {
 
   const isWizardStep = typeof step === 'number' && step >= 1 && step <= 5;
   const wizardStep   = isWizardStep ? (step as number) : 0;
-  // During loading, show all steps as done in the sidebar
   const displayStep  = step === 'loading' ? 6 : wizardStep;
 
   const stepValues = [
@@ -218,6 +216,11 @@ export default function GiftFinderWizard() {
     VIBES.find(v => v.value === form.relatedness)?.label ?? '',
   ];
 
+  // ── Slider index helpers ──
+
+  const vibeIdx  = VIBES.findIndex(v => v.value === resultForm.relatedness);
+  const levelIdx = LEVELS.findIndex(l => l.value === resultForm.level);
+
   // ── Style helpers ──
 
   const chipStyle = (active: boolean): React.CSSProperties => ({
@@ -226,14 +229,6 @@ export default function GiftFinderWizard() {
     background:  active ? C.textPri : C.surface,
     color:       active ? C.bg      : C.textSec,
     cursor: 'pointer', fontWeight: active ? 500 : 400, fontFamily: 'inherit',
-  });
-
-  const filterChipStyle = (active: boolean): React.CSSProperties => ({
-    padding: '4px 10px', borderRadius: 16, fontSize: 12,
-    border:     `1px solid ${active ? '#44445a' : C.border}`,
-    background:  active ? '#22222e' : C.surface,
-    color:       active ? C.textPri : C.textSec,
-    cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit',
   });
 
   const levelCardStyle = (active: boolean): React.CSSProperties => ({
@@ -281,7 +276,7 @@ export default function GiftFinderWizard() {
           fontFamily: 'inherit',
         }}
       >
-        <span style={{ color: C.accent }}>✦</span> Gift Finder
+        <span style={{ color: C.accent }}>✦</span> Strix
       </button>
 
       {isWizardStep && (
@@ -308,57 +303,74 @@ export default function GiftFinderWizard() {
     </nav>
   );
 
+  // ── Sidebar brand footer (shared) ─────────────────────────────────────
+
+  const sidebarBrandFooter = (
+    <div style={{ padding: '12px 20px', borderTop: `1px solid #16161e`, flexShrink: 0 }}>
+      <p style={{ fontSize: 10, color: C.textMuted, lineHeight: 1.6, fontStyle: 'italic' }}>
+        {TAGLINE}
+      </p>
+    </div>
+  );
+
   // ── Wizard / loading sidebar ───────────────────────────────────────────
-  // Used during steps 1-5 AND during initial loading (displayStep=6 → all done)
 
   const wizardSidebar = (
     <aside className="hidden lg:flex flex-col border-r flex-shrink-0"
-      style={{ borderColor: '#16161e', width: 260, minHeight: 'calc(100vh - 52px)', padding: '28px 20px' }}>
-      <p style={{ fontSize: 10, color: C.textMuted, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 20 }}>
-        Your search
-      </p>
-      <div style={{ flex: 1 }}>
-        {STEP_NAMES.map((name, i) => {
-          const n = i + 1;
-          const s = n < displayStep ? 'done' : n === displayStep ? 'active' : 'pending';
-          return (
-            <div key={name} style={{
-              display: 'flex', alignItems: 'flex-start', gap: 12,
-              padding: '10px 12px', borderRadius: 10, marginBottom: 4,
-              background: s === 'active' ? 'rgba(232,114,74,0.08)' : s === 'done' ? C.surface : 'transparent',
-              border: `1px solid ${s === 'active' ? 'rgba(232,114,74,0.2)' : 'transparent'}`,
-              opacity: s === 'pending' ? 0.4 : 1,
-            }}>
-              <div style={{
-                width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 11, fontWeight: 500,
-                background: s === 'active' ? C.accent : s === 'done' ? '#22222e' : C.surface,
-                color:      s === 'active' ? '#fff'   : s === 'done' ? C.textSec  : C.textMuted,
-                border: s === 'pending' ? `1px solid ${C.border}` : 'none',
-              }}>
-                {s === 'done' ? '✓' : n}
-              </div>
-              <div>
-                <p style={{ fontSize: 12, fontWeight: 500, color: s === 'pending' ? C.textMuted : C.textPri, marginBottom: 2 }}>
-                  {name}
-                </p>
-                {s === 'done' && stepValues[i] && (
-                  <p style={{ fontSize: 11, color: C.textSec }}>{stepValues[i]}</p>
-                )}
-                {s === 'active' && (
-                  <p style={{ fontSize: 11, color: C.accent }}>In progress</p>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <div style={{ paddingTop: 20, borderTop: `1px solid #16161e` }}>
-        <p style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.5 }}>
-          Your answers stay on this page and are never stored.
+      style={{
+        borderColor: '#16161e', width: 260,
+        height: 'calc(100vh - 52px)', position: 'sticky', top: 52,
+        overflow: 'hidden',
+      }}>
+      {/* Scrollable content */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '28px 20px' }}>
+        <p style={{ fontSize: 10, color: C.textMuted, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 20 }}>
+          Your search
         </p>
+        <div>
+          {STEP_NAMES.map((name, i) => {
+            const n = i + 1;
+            const s = n < displayStep ? 'done' : n === displayStep ? 'active' : 'pending';
+            return (
+              <div key={name} style={{
+                display: 'flex', alignItems: 'flex-start', gap: 12,
+                padding: '10px 12px', borderRadius: 10, marginBottom: 4,
+                background: s === 'active' ? 'rgba(232,114,74,0.08)' : s === 'done' ? C.surface : 'transparent',
+                border: `1px solid ${s === 'active' ? 'rgba(232,114,74,0.2)' : 'transparent'}`,
+                opacity: s === 'pending' ? 0.4 : 1,
+              }}>
+                <div style={{
+                  width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 11, fontWeight: 500,
+                  background: s === 'active' ? C.accent : s === 'done' ? '#22222e' : C.surface,
+                  color:      s === 'active' ? '#fff'   : s === 'done' ? C.textSec  : C.textMuted,
+                  border: s === 'pending' ? `1px solid ${C.border}` : 'none',
+                }}>
+                  {s === 'done' ? '✓' : n}
+                </div>
+                <div>
+                  <p style={{ fontSize: 12, fontWeight: 500, color: s === 'pending' ? C.textMuted : C.textPri, marginBottom: 2 }}>
+                    {name}
+                  </p>
+                  {s === 'done' && stepValues[i] && (
+                    <p style={{ fontSize: 11, color: C.textSec }}>{stepValues[i]}</p>
+                  )}
+                  {s === 'active' && (
+                    <p style={{ fontSize: 11, color: C.accent }}>In progress</p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ paddingTop: 20, marginTop: 8 }}>
+          <p style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.5 }}>
+            Your answers stay on this page and are never stored.
+          </p>
+        </div>
       </div>
+      {sidebarBrandFooter}
     </aside>
   );
 
@@ -366,38 +378,56 @@ export default function GiftFinderWizard() {
 
   const resultsSidebar = (
     <aside className="hidden lg:flex flex-col border-r flex-shrink-0"
-      style={{ borderColor: '#16161e', width: 260, minHeight: 'calc(100vh - 52px)', padding: '28px 20px' }}>
+      style={{
+        borderColor: '#16161e', width: 260,
+        height: 'calc(100vh - 52px)', position: 'sticky', top: 52,
+        overflow: 'hidden',
+      }}>
 
-      {/* Search summary — no depth here, moved to refine */}
-      <div style={{ marginBottom: 20 }}>
-        <p style={{ fontSize: 10, color: C.textMuted, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 12 }}>
-          Your search
-        </p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
-          {[form.recipient, form.age, form.occasion].filter(Boolean).map(v => (
-            <span key={v} style={{ padding: '5px 10px', borderRadius: 20, fontSize: 12, background: C.textPri, color: C.bg, fontWeight: 500 }}>
-              {v}
-            </span>
-          ))}
-        </div>
-        {form.interests && (
-          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 12px' }}>
-            <p style={{ fontSize: 11, color: C.textMuted, marginBottom: 4 }}>Interests</p>
-            <p style={{ fontSize: 12, color: C.textSec, lineHeight: 1.5 }}>{form.interests}</p>
+      {/* Scrollable content */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '28px 20px' }}>
+
+        {/* Search summary header with Edit button */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <p style={{ fontSize: 10, color: C.textMuted, letterSpacing: '0.07em', textTransform: 'uppercase' }}>
+              Your search
+            </p>
+            <button
+              onClick={resetSearch}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                fontSize: 11, color: C.accent, fontFamily: 'inherit',
+                padding: 0, lineHeight: 1,
+              }}
+            >
+              ✎ Edit
+            </button>
           </div>
-        )}
-      </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+            {[form.recipient, form.age, form.occasion].filter(Boolean).map(v => (
+              <span key={v} style={{ padding: '5px 10px', borderRadius: 20, fontSize: 12, background: C.textPri, color: C.bg, fontWeight: 500 }}>
+                {v}
+              </span>
+            ))}
+          </div>
+          {form.interests && (
+            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 12px' }}>
+              <p style={{ fontSize: 11, color: C.textMuted, marginBottom: 4 }}>Interests</p>
+              <p style={{ fontSize: 12, color: C.textSec, lineHeight: 1.5 }}>{form.interests}</p>
+            </div>
+          )}
+        </div>
 
-      <div style={{ height: 1, background: '#16161e', marginBottom: 20 }} />
+        <div style={{ height: 1, background: '#16161e', marginBottom: 20 }} />
 
-      {/* Refine controls — flex-1 so it fills, refresh button sticks to bottom */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        {/* Refine controls */}
         <p style={{ fontSize: 10, color: C.textMuted, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 16 }}>
           Refine results
         </p>
 
-        {/* Price */}
-        <div style={{ marginBottom: 18 }}>
+        {/* Price dual-range */}
+        <div style={{ marginBottom: 22 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
             <p style={{ fontSize: 12, color: C.textSec }}>Price range</p>
             <span style={{ fontSize: 12, color: C.textPri, fontWeight: 500 }}>
@@ -427,36 +457,52 @@ export default function GiftFinderWizard() {
           </div>
         </div>
 
-        {/* Adventurousness */}
-        <div style={{ marginBottom: 18 }}>
-          <p style={{ fontSize: 12, color: C.textSec, marginBottom: 8 }}>How adventurous?</p>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {/* How adventurous — slider */}
+        <div style={{ marginBottom: 22 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+            <p style={{ fontSize: 12, color: C.textSec }}>How adventurous?</p>
+            <span style={{ fontSize: 12, color: C.textPri, fontWeight: 500 }}>{VIBES[vibeIdx]?.label}</span>
+          </div>
+          <input
+            type="range" min={0} max={2} step={1}
+            value={vibeIdx}
+            onChange={e => setResultForm(prev => ({ ...prev, relatedness: VIBES[Number(e.target.value)].value }))}
+            style={{ width: '100%', accentColor: C.accent }}
+            aria-label="How adventurous"
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
             {VIBES.map(v => (
-              <button key={v.value}
-                onClick={() => setResultForm(prev => ({ ...prev, relatedness: v.value }))}
-                style={filterChipStyle(resultForm.relatedness === v.value)}>
+              <span key={v.value} style={{ fontSize: 10, color: C.textMuted, textAlign: 'center', maxWidth: 60, lineHeight: 1.3 }}>
                 {v.label}
-              </button>
+              </span>
             ))}
           </div>
         </div>
 
-        {/* Depth — moved here, interactive, triggers refresh */}
-        <div style={{ marginBottom: 18 }}>
-          <p style={{ fontSize: 12, color: C.textSec, marginBottom: 8 }}>Depth of interest</p>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {/* Depth of interest — slider */}
+        <div style={{ marginBottom: 22 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+            <p style={{ fontSize: 12, color: C.textSec }}>Depth of interest</p>
+            <span style={{ fontSize: 12, color: C.textPri, fontWeight: 500 }}>{LEVELS[levelIdx]?.label}</span>
+          </div>
+          <input
+            type="range" min={0} max={2} step={1}
+            value={levelIdx}
+            onChange={e => setResultForm(prev => ({ ...prev, level: LEVELS[Number(e.target.value)].value }))}
+            style={{ width: '100%', accentColor: C.accent }}
+            aria-label="Depth of interest"
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
             {LEVELS.map(l => (
-              <button key={l.value}
-                onClick={() => setResultForm(prev => ({ ...prev, level: l.value }))}
-                style={filterChipStyle(resultForm.level === l.value)}>
+              <span key={l.value} style={{ fontSize: 10, color: C.textMuted, textAlign: 'center', maxWidth: 60, lineHeight: 1.3 }}>
                 {l.label}
-              </button>
+              </span>
             ))}
           </div>
         </div>
 
         {/* Number of results — slider */}
-        <div style={{ marginBottom: 18 }}>
+        <div style={{ marginBottom: 8 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
             <p style={{ fontSize: 12, color: C.textSec }}>Number of results</p>
             <span style={{ fontSize: 12, color: C.textPri, fontWeight: 500 }}>{resultForm.count}</span>
@@ -475,11 +521,11 @@ export default function GiftFinderWizard() {
           </div>
         </div>
 
-        {/* Spacer pushes refresh button to bottom */}
-        <div style={{ flex: 1 }} />
+      </div>
 
-        {/* Refresh button — only shown when depth or count has changed */}
-        {needsRefresh && (
+      {/* Sticky refresh button footer */}
+      {needsRefresh && (
+        <div style={{ padding: '12px 20px', borderTop: `1px solid #16161e`, background: C.bg, flexShrink: 0 }}>
           <button
             onClick={handleRefresh}
             disabled={refreshing}
@@ -492,12 +538,14 @@ export default function GiftFinderWizard() {
           >
             {refreshing ? 'Refreshing…' : '↻  Refresh results'}
           </button>
-        )}
-      </div>
+        </div>
+      )}
+
+      {sidebarBrandFooter}
     </aside>
   );
 
-  // ── Landing screen — full width, no "how it works" sidebar ────────────
+  // ── Landing screen ─────────────────────────────────────────────────────
 
   const landingScreen = (
     <div style={{ minHeight: 'calc(100vh - 52px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 24px' }}>
@@ -529,6 +577,9 @@ export default function GiftFinderWizard() {
         </button>
         <p style={{ fontSize: 11, color: C.textMuted, marginTop: 16 }}>
           Free · No account needed · Usually takes less than a minute
+        </p>
+        <p style={{ fontSize: 10, color: C.textMuted, marginTop: 32, lineHeight: 1.6, fontStyle: 'italic' }}>
+          {TAGLINE}
         </p>
       </div>
     </div>
@@ -726,7 +777,13 @@ export default function GiftFinderWizard() {
           {VIBES.map(v => (
             <button key={v.value}
               onClick={() => setResultForm(prev => ({ ...prev, relatedness: v.value }))}
-              style={{ ...filterChipStyle(resultForm.relatedness === v.value), flexShrink: 0 }}>
+              style={{
+                padding: '4px 10px', borderRadius: 16, fontSize: 12, flexShrink: 0,
+                border:     `1px solid ${resultForm.relatedness === v.value ? '#44445a' : C.border}`,
+                background:  resultForm.relatedness === v.value ? '#22222e' : C.surface,
+                color:       resultForm.relatedness === v.value ? C.textPri : C.textSec,
+                cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit',
+              }}>
               {v.label}
             </button>
           ))}
@@ -744,14 +801,13 @@ export default function GiftFinderWizard() {
         </span>
       </div>
 
-      {/* Refreshing overlay skeleton */}
       {refreshing ? loadingSkeleton : (
         visibleThemes.length > 0 ? (
           visibleThemes.map(theme => <GiftThemeSection key={theme.id} theme={theme} />)
         ) : (
           <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: '40px 24px', textAlign: 'center' }}>
             <p style={{ fontSize: 14, color: C.textSec }}>
-              No gifts match the current filters. Try widening the price range or changing the adventurousness setting.
+              No gifts match the current filters. Try widening the price range or adjusting the adventurousness setting.
             </p>
           </div>
         )
