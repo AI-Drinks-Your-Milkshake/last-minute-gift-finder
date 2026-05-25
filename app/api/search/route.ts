@@ -13,23 +13,41 @@ function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
 }
 
+/**
+ * Returns true if the request carries the owner-bypass cookie matching
+ * OWNER_BYPASS_TOKEN. The cookie is installed via the /api/owner magic URL.
+ * Falsy if either the env var is unset or the cookie is missing/wrong.
+ */
+function isOwnerBypass(request: NextRequest): boolean {
+  const expected = process.env.OWNER_BYPASS_TOKEN;
+  if (!expected) return false;
+  return request.cookies.get('strix_owner')?.value === expected;
+}
+
 export async function POST(request: NextRequest) {
   const ip = getClientIp(request);
+  const ownerBypass = isOwnerBypass(request);
 
-  // Rate limit check — fail open so KV errors don't break the app
+  // Rate limit check — fail open so KV errors don't break the app.
+  // Owners with the bypass cookie skip the check entirely.
   let rateLimitRemaining = 5;
-  try {
-    const { allowed, remaining } = await checkRateLimit(ip);
-    rateLimitRemaining = remaining;
+  if (!ownerBypass) {
+    try {
+      const { allowed, remaining } = await checkRateLimit(ip);
+      rateLimitRemaining = remaining;
 
-    if (!allowed) {
-      return NextResponse.json(
-        { error: 'You have reached the limit of 5 searches per day. Please try again tomorrow.' },
-        { status: 429, headers: { 'X-RateLimit-Remaining': '0' } },
-      );
+      if (!allowed) {
+        return NextResponse.json(
+          { error: 'You have reached the limit of 5 searches per day. Please try again tomorrow.' },
+          { status: 429, headers: { 'X-RateLimit-Remaining': '0' } },
+        );
+      }
+    } catch (err) {
+      console.error('Rate limit check failed:', err);
     }
-  } catch (err) {
-    console.error('Rate limit check failed:', err);
+  } else {
+    // Sentinel value surfaced to the client header — purely cosmetic
+    rateLimitRemaining = 999;
   }
 
   let body: Record<string, unknown>;
