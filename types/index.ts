@@ -21,7 +21,7 @@ export interface SearchApiRequest {
   age: string;
   occasion: string;
   interests: string;
-  count: 6 | 9 | 12;
+  count: number;
   priceMin: number;
   priceMax: number;
   level: 'casual' | 'interested' | 'enthusiast';

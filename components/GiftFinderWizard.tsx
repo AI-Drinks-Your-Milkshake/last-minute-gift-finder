@@ -27,15 +27,18 @@ const LEVELS: Array<{ value: SearchFormData['level']; label: string; desc: strin
 ];
 
 const VIBES: Array<{ value: SearchFormData['relatedness']; label: string; desc: string }> = [
-  { value: 'similar',    label: 'Just like this', desc: 'Ideas that directly match their interests' },
-  { value: 'mixed',      label: 'Mix it up',      desc: 'Some obvious picks, some adjacent surprises' },
-  { value: 'adventurous',label: 'Surprise me',    desc: 'Unexpected ideas that open new doors' },
+  { value: 'similar',     label: 'Just like this', desc: 'Ideas that directly match their interests' },
+  { value: 'mixed',       label: 'Mix it up',      desc: 'Some obvious picks, some adjacent surprises' },
+  { value: 'adventurous', label: 'Surprise me',    desc: 'Unexpected ideas that open new doors' },
 ];
 
 const COUNT_OPTIONS = [6, 9, 12] as const;
-const PRICE_MIN = 0;
-const PRICE_MAX = 1500;
+const PRICE_MIN  = 0;
+const PRICE_MAX  = 1500;
 const PRICE_STEP = 25;
+const COUNT_MIN  = 3;
+const COUNT_MAX  = 15;
+const COUNT_STEP = 3;
 const STEP_NAMES = ['Who', 'Age', 'Occasion', 'About them', 'Adventurousness'];
 
 type WizardStep = 0 | 1 | 2 | 3 | 4 | 5 | 'loading' | 'results';
@@ -47,18 +50,17 @@ function fmt(n: number): string {
 }
 
 const DEFAULT_FORM: SearchFormData = {
-  recipient: '',
-  age: '',
-  occasion: '',
-  interests: '',
-  count: 9,
-  priceMin: 0,
-  priceMax: 1500,
-  level: 'interested',
-  relatedness: 'mixed',
+  recipient:  '',
+  age:        '',
+  occasion:   '',
+  interests:  '',
+  count:      9,
+  priceMin:   0,
+  priceMax:   1500,
+  level:      'interested',
+  relatedness:'mixed',
 };
 
-// Dark-surface style constants
 const C = {
   bg:        '#0d0d11',
   surface:   '#16161e',
@@ -69,14 +71,28 @@ const C = {
   textMuted: '#44445a',
 };
 
+// ── Wizard step wrapper — module-level so React never remounts it ──────────
+
+function StepWrap({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="px-5 py-8 sm:px-10 lg:px-12 lg:py-10" style={{ maxWidth: 600 }}>
+      {children}
+    </div>
+  );
+}
+
 // ── Main component ─────────────────────────────────────────────────────────
 
 export default function GiftFinderWizard() {
-  const [step,       setStep]       = useState<WizardStep>(0);
-  const [form,       setForm]       = useState<SearchFormData>(DEFAULT_FORM);
-  const [themes,     setThemes]     = useState<GiftTheme[]>([]);
-  const [error,      setError]      = useState<string | null>(null);
-  const [resultForm, setResultForm] = useState<SearchFormData>(DEFAULT_FORM);
+  const [step,           setStep]           = useState<WizardStep>(0);
+  const [form,           setForm]           = useState<SearchFormData>(DEFAULT_FORM);
+  const [themes,         setThemes]         = useState<GiftTheme[]>([]);
+  const [error,          setError]          = useState<string | null>(null);
+  const [resultForm,     setResultForm]     = useState<SearchFormData>(DEFAULT_FORM);
+  const [refreshing,     setRefreshing]     = useState(false);
+  // Track what was last sent to the API so we know when a re-fetch is needed
+  const [committedLevel, setCommittedLevel] = useState<SearchFormData['level']>('interested');
+  const [committedCount, setCommittedCount] = useState<number>(9);
 
   // ── Form helpers ──
 
@@ -94,24 +110,25 @@ export default function GiftFinderWizard() {
     setResultForm(prev => ({ ...prev, priceMax: Math.min(PRICE_MAX, v) }));
   }
 
+  // Change 6: "New search" goes to step 1, not landing
   function resetSearch() {
     setForm(DEFAULT_FORM);
     setThemes([]);
     setError(null);
-    setStep(0);
+    setStep(1);
   }
 
-  // ── API call ──
+  // ── Initial search ──
 
   async function handleSubmit() {
     setStep('loading');
     setError(null);
     try {
       const { relatedness: _r, ...apiBody } = form;
-      const res = await fetch('/api/search', {
-        method: 'POST',
+      const res  = await fetch('/api/search', {
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(apiBody),
+        body:    JSON.stringify(apiBody),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -121,6 +138,8 @@ export default function GiftFinderWizard() {
       }
       setThemes(data.themes);
       setResultForm({ ...form });
+      setCommittedLevel(form.level);
+      setCommittedCount(form.count);
       setStep('results');
     } catch {
       setError('Network error. Please check your connection and try again.');
@@ -128,14 +147,42 @@ export default function GiftFinderWizard() {
     }
   }
 
+  // ── Refresh (re-fetch with new depth/count from sidebar) ──
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      const { relatedness: _r, ...apiBody } = {
+        ...form,
+        level: resultForm.level,
+        count: resultForm.count,
+      };
+      const res  = await fetch('/api/search', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(apiBody),
+      });
+      const data = await res.json();
+      if (!res.ok) return; // silently keep old results on error
+      setThemes(data.themes);
+      setCommittedLevel(resultForm.level);
+      setCommittedCount(resultForm.count);
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  // Show refresh button when depth or count differs from last API call
+  const needsRefresh = resultForm.level !== committedLevel || resultForm.count !== committedCount;
+
   // ── Filtered results ──
 
   const visibleThemes = useMemo<GiftTheme[]>(() => {
     const { relatedness, priceMin, priceMax, count } = resultForm;
     const byFilter = themes
       .filter(t => {
-        if (relatedness === 'similar')    return t.relatednessLevel === 1;
-        if (relatedness === 'mixed')      return t.relatednessLevel <= 2;
+        if (relatedness === 'similar') return t.relatednessLevel === 1;
+        if (relatedness === 'mixed')   return t.relatednessLevel <= 2;
         return true;
       })
       .map(t => ({
@@ -160,6 +207,8 @@ export default function GiftFinderWizard() {
 
   const isWizardStep = typeof step === 'number' && step >= 1 && step <= 5;
   const wizardStep   = isWizardStep ? (step as number) : 0;
+  // During loading, show all steps as done in the sidebar
+  const displayStep  = step === 'loading' ? 6 : wizardStep;
 
   const stepValues = [
     form.recipient,
@@ -169,68 +218,49 @@ export default function GiftFinderWizard() {
     VIBES.find(v => v.value === form.relatedness)?.label ?? '',
   ];
 
-  // ── Style helpers (defined outside JSX to avoid recreation noise) ──
+  // ── Style helpers ──
 
   const chipStyle = (active: boolean): React.CSSProperties => ({
-    padding: '9px 16px',
-    borderRadius: 22,
-    fontSize: 14,
-    border: `1px solid ${active ? C.textPri : C.border}`,
-    background:  active ? C.textPri  : C.surface,
-    color:        active ? C.bg       : C.textSec,
-    cursor: 'pointer',
-    fontWeight:   active ? 500 : 400,
-    fontFamily: 'inherit',
+    padding: '9px 16px', borderRadius: 22, fontSize: 14,
+    border:     `1px solid ${active ? C.textPri : C.border}`,
+    background:  active ? C.textPri : C.surface,
+    color:       active ? C.bg      : C.textSec,
+    cursor: 'pointer', fontWeight: active ? 500 : 400, fontFamily: 'inherit',
   });
 
   const filterChipStyle = (active: boolean): React.CSSProperties => ({
-    padding: '4px 10px',
-    borderRadius: 16,
-    fontSize: 12,
-    border: `1px solid ${active ? '#44445a' : C.border}`,
-    background: active ? '#22222e' : C.surface,
-    color:       active ? C.textPri  : C.textSec,
-    cursor: 'pointer',
-    whiteSpace: 'nowrap',
-    fontFamily: 'inherit',
+    padding: '4px 10px', borderRadius: 16, fontSize: 12,
+    border:     `1px solid ${active ? '#44445a' : C.border}`,
+    background:  active ? '#22222e' : C.surface,
+    color:       active ? C.textPri : C.textSec,
+    cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit',
   });
 
   const levelCardStyle = (active: boolean): React.CSSProperties => ({
     flex: 1,
-    background: active ? 'rgba(232,114,74,0.08)' : C.surface,
+    background:  active ? 'rgba(232,114,74,0.08)' : C.surface,
     border:     `1px solid ${active ? C.accent : C.border}`,
-    borderRadius: 12,
-    padding: '14px 12px',
-    cursor: 'pointer',
-    textAlign: 'left',
+    borderRadius: 12, padding: '14px 12px', cursor: 'pointer', textAlign: 'left',
   });
 
   const vibeCardStyle = (active: boolean): React.CSSProperties => ({
-    background: active ? 'rgba(232,114,74,0.08)' : C.surface,
+    background:  active ? 'rgba(232,114,74,0.08)' : C.surface,
     border:     `1px solid ${active ? C.accent : C.border}`,
-    borderRadius: 12,
-    padding: '14px 16px',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: 14,
-    width: '100%',
-    textAlign: 'left',
+    borderRadius: 12, padding: '14px 16px', cursor: 'pointer',
+    display: 'flex', alignItems: 'center', gap: 14, width: '100%', textAlign: 'left',
   });
 
   const backBtn: React.CSSProperties = {
-    background: 'none', border: 'none',
-    color: C.textMuted, fontSize: 13, cursor: 'pointer',
-    display: 'flex', alignItems: 'center', gap: 4,
+    background: 'none', border: 'none', color: C.textMuted,
+    fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
     fontFamily: 'inherit',
   };
 
   const continueBtn = (enabled: boolean): React.CSSProperties => ({
-    background:   enabled ? C.accent : '#22222e',
-    color:        enabled ? '#fff'   : C.textMuted,
-    border: 'none', borderRadius: 12,
-    padding: '13px 28px', fontSize: 15, fontWeight: 500,
-    cursor: enabled ? 'pointer' : 'not-allowed',
+    background: enabled ? C.accent : '#22222e',
+    color:      enabled ? '#fff'   : C.textMuted,
+    border: 'none', borderRadius: 12, padding: '13px 28px',
+    fontSize: 15, fontWeight: 500, cursor: enabled ? 'pointer' : 'not-allowed',
     fontFamily: 'inherit',
   });
 
@@ -259,20 +289,18 @@ export default function GiftFinderWizard() {
           <div style={{ width: 120, height: 2, background: '#22222e', borderRadius: 2, overflow: 'hidden' }}>
             <div style={{
               height: '100%', background: C.accent, borderRadius: 2,
-              width: `${(wizardStep / 5) * 100}%`,
-              transition: 'width 0.3s ease',
+              width: `${(wizardStep / 5) * 100}%`, transition: 'width 0.3s ease',
             }} />
           </div>
           <span style={{ fontSize: 12, color: C.textMuted }}>{wizardStep} of 5</span>
         </div>
       )}
 
-      {step === 'results' && (
+      {(step === 'results' || step === 'loading') && (
         <button onClick={resetSearch} style={{
           background: 'none', border: `1px solid ${C.border}`,
           borderRadius: 20, padding: '4px 12px',
-          fontSize: 12, color: C.textMuted, cursor: 'pointer',
-          fontFamily: 'inherit',
+          fontSize: 12, color: C.textMuted, cursor: 'pointer', fontFamily: 'inherit',
         }}>
           New search
         </button>
@@ -280,7 +308,8 @@ export default function GiftFinderWizard() {
     </nav>
   );
 
-  // ── Wizard progress sidebar ────────────────────────────────────────────
+  // ── Wizard / loading sidebar ───────────────────────────────────────────
+  // Used during steps 1-5 AND during initial loading (displayStep=6 → all done)
 
   const wizardSidebar = (
     <aside className="hidden lg:flex flex-col border-r flex-shrink-0"
@@ -291,7 +320,7 @@ export default function GiftFinderWizard() {
       <div style={{ flex: 1 }}>
         {STEP_NAMES.map((name, i) => {
           const n = i + 1;
-          const s = n < wizardStep ? 'done' : n === wizardStep ? 'active' : 'pending';
+          const s = n < displayStep ? 'done' : n === displayStep ? 'active' : 'pending';
           return (
             <div key={name} style={{
               display: 'flex', alignItems: 'flex-start', gap: 12,
@@ -305,7 +334,7 @@ export default function GiftFinderWizard() {
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: 11, fontWeight: 500,
                 background: s === 'active' ? C.accent : s === 'done' ? '#22222e' : C.surface,
-                color:      s === 'active' ? '#fff'    : s === 'done' ? C.textSec  : C.textMuted,
+                color:      s === 'active' ? '#fff'   : s === 'done' ? C.textSec  : C.textMuted,
                 border: s === 'pending' ? `1px solid ${C.border}` : 'none',
               }}>
                 {s === 'done' ? '✓' : n}
@@ -337,10 +366,10 @@ export default function GiftFinderWizard() {
 
   const resultsSidebar = (
     <aside className="hidden lg:flex flex-col border-r flex-shrink-0"
-      style={{ borderColor: '#16161e', width: 260, minHeight: 'calc(100vh - 52px)', padding: '28px 20px', gap: 20 }}>
+      style={{ borderColor: '#16161e', width: 260, minHeight: 'calc(100vh - 52px)', padding: '28px 20px' }}>
 
-      {/* Search summary */}
-      <div>
+      {/* Search summary — no depth here, moved to refine */}
+      <div style={{ marginBottom: 20 }}>
         <p style={{ fontSize: 10, color: C.textMuted, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 12 }}>
           Your search
         </p>
@@ -352,26 +381,18 @@ export default function GiftFinderWizard() {
           ))}
         </div>
         {form.interests && (
-          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 12px', marginBottom: 10 }}>
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 12px' }}>
             <p style={{ fontSize: 11, color: C.textMuted, marginBottom: 4 }}>Interests</p>
             <p style={{ fontSize: 12, color: C.textSec, lineHeight: 1.5 }}>{form.interests}</p>
           </div>
         )}
-        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '8px 12px' }}>
-          <p style={{ fontSize: 11, color: C.textMuted, marginBottom: 6 }}>Depth</p>
-          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-            {LEVELS.map(l => (
-              <span key={l.value} style={filterChipStyle(form.level === l.value)}>{l.label}</span>
-            ))}
-          </div>
-        </div>
       </div>
 
-      <div style={{ height: 1, background: '#16161e' }} />
+      <div style={{ height: 1, background: '#16161e', marginBottom: 20 }} />
 
-      {/* Refine controls */}
-      <div>
-        <p style={{ fontSize: 10, color: C.textMuted, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 14 }}>
+      {/* Refine controls — flex-1 so it fills, refresh button sticks to bottom */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <p style={{ fontSize: 10, color: C.textMuted, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 16 }}>
           Refine results
         </p>
 
@@ -407,7 +428,7 @@ export default function GiftFinderWizard() {
         </div>
 
         {/* Adventurousness */}
-        <div>
+        <div style={{ marginBottom: 18 }}>
           <p style={{ fontSize: 12, color: C.textSec, marginBottom: 8 }}>How adventurous?</p>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {VIBES.map(v => (
@@ -419,85 +440,101 @@ export default function GiftFinderWizard() {
             ))}
           </div>
         </div>
+
+        {/* Depth — moved here, interactive, triggers refresh */}
+        <div style={{ marginBottom: 18 }}>
+          <p style={{ fontSize: 12, color: C.textSec, marginBottom: 8 }}>Depth of interest</p>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {LEVELS.map(l => (
+              <button key={l.value}
+                onClick={() => setResultForm(prev => ({ ...prev, level: l.value }))}
+                style={filterChipStyle(resultForm.level === l.value)}>
+                {l.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Number of results — slider */}
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+            <p style={{ fontSize: 12, color: C.textSec }}>Number of results</p>
+            <span style={{ fontSize: 12, color: C.textPri, fontWeight: 500 }}>{resultForm.count}</span>
+          </div>
+          <input
+            type="range"
+            min={COUNT_MIN} max={COUNT_MAX} step={COUNT_STEP}
+            value={resultForm.count}
+            onChange={e => setResultForm(prev => ({ ...prev, count: Number(e.target.value) }))}
+            style={{ width: '100%', accentColor: C.accent }}
+            aria-label="Number of results"
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
+            <span style={{ fontSize: 11, color: C.textMuted }}>{COUNT_MIN}</span>
+            <span style={{ fontSize: 11, color: C.textMuted }}>{COUNT_MAX}</span>
+          </div>
+        </div>
+
+        {/* Spacer pushes refresh button to bottom */}
+        <div style={{ flex: 1 }} />
+
+        {/* Refresh button — only shown when depth or count has changed */}
+        {needsRefresh && (
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            style={{
+              width: '100%', background: C.accent, color: '#fff',
+              border: 'none', borderRadius: 10, padding: '11px 16px',
+              fontSize: 13, fontWeight: 500, cursor: refreshing ? 'not-allowed' : 'pointer',
+              opacity: refreshing ? 0.7 : 1, fontFamily: 'inherit',
+            }}
+          >
+            {refreshing ? 'Refreshing…' : '↻  Refresh results'}
+          </button>
+        )}
       </div>
     </aside>
   );
 
-  // ── Landing screen ─────────────────────────────────────────────────────
+  // ── Landing screen — full width, no "how it works" sidebar ────────────
 
   const landingScreen = (
-    <div className="flex lg:grid" style={{ minHeight: 'calc(100vh - 52px)' }}
-      // On desktop: two-column via inline grid override
-    >
-      <div className="hidden lg:flex flex-col justify-center border-r flex-shrink-0"
-        style={{ borderColor: '#16161e', width: 280, padding: '40px 28px', gap: 24 }}>
-        <p style={{ fontSize: 10, color: C.textMuted, letterSpacing: '0.07em', textTransform: 'uppercase' }}>
-          How it works
+    <div style={{ minHeight: 'calc(100vh - 52px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 24px' }}>
+      <div style={{ maxWidth: 500, width: '100%' }}>
+        <p style={{ fontSize: 12, color: C.textMuted, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 16 }}>
+          AI gift finder
         </p>
-        {[
-          { icon: '👤', title: 'Tell us about them',    desc: 'Recipient, age, occasion, and interests in plain language' },
-          { icon: '✨', title: 'AI generates ideas',    desc: 'Grouped from dead-on to unexpectedly brilliant' },
-          { icon: '⚙️', title: 'Filter and refine',     desc: 'Narrow by price, count, or adventurousness' },
-        ].map(item => (
-          <div key={item.title} style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-            <div style={{ width: 32, height: 32, background: C.surface, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0 }}>
-              {item.icon}
-            </div>
-            <div>
-              <p style={{ fontSize: 13, fontWeight: 500, color: C.textPri, marginBottom: 3 }}>{item.title}</p>
-              <p style={{ fontSize: 12, color: C.textMuted, lineHeight: 1.5 }}>{item.desc}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <main style={{ flex: 1, padding: '60px 24px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}
-        className="lg:px-12">
-        <div style={{ maxWidth: 460 }}>
-          <p style={{ fontSize: 12, color: C.textMuted, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 16 }}>
-            AI gift finder
-          </p>
-          <h1 style={{ fontSize: 38, fontWeight: 500, color: C.textPri, lineHeight: 1.15, marginBottom: 14, letterSpacing: '-0.02em' }}
-            className="text-3xl lg:text-4xl">
-            The perfect gift,<br />
-            <span style={{ color: C.accent }}>in under a minute.</span>
-          </h1>
-          <p style={{ fontSize: 16, color: C.textSec, lineHeight: 1.7, marginBottom: 32, maxWidth: 380 }}>
-            Describe who you&apos;re shopping for and we&apos;ll generate tailored ideas — from dead-on to unexpectedly brilliant.
-          </p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 36 }}>
-            {['Birthdays', 'Holidays', 'Anniversaries', 'Weddings', 'Just because'].map(tag => (
-              <span key={tag} style={{ padding: '6px 12px', borderRadius: 20, fontSize: 12, border: `1px solid ${C.border}`, color: C.textSec, background: C.surface }}>
-                {tag}
-              </span>
-            ))}
-          </div>
-          <button onClick={() => setStep(1)} style={{
-            background: C.accent, color: '#fff', border: 'none', borderRadius: 12,
-            padding: '15px 32px', fontSize: 16, fontWeight: 500, cursor: 'pointer',
-            fontFamily: 'inherit',
-          }}>
-            Get started →
-          </button>
-          <p style={{ fontSize: 11, color: C.textMuted, marginTop: 14 }}>
-            Free · No account needed · Usually takes less than a minute
-          </p>
+        <h1 style={{ fontSize: 42, fontWeight: 500, color: C.textPri, lineHeight: 1.15, marginBottom: 14, letterSpacing: '-0.02em' }}
+          className="text-3xl lg:text-5xl">
+          The perfect gift,<br />
+          <span style={{ color: C.accent }}>in under a minute.</span>
+        </h1>
+        <p style={{ fontSize: 16, color: C.textSec, lineHeight: 1.7, marginBottom: 32, maxWidth: 400 }}>
+          Describe who you&apos;re shopping for and we&apos;ll generate tailored ideas — from dead-on to unexpectedly brilliant.
+        </p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 40 }}>
+          {['Birthdays', 'Holidays', 'Anniversaries', 'Weddings', 'Just because'].map(tag => (
+            <span key={tag} style={{ padding: '6px 12px', borderRadius: 20, fontSize: 12, border: `1px solid ${C.border}`, color: C.textSec, background: C.surface }}>
+              {tag}
+            </span>
+          ))}
         </div>
-      </main>
+        <button onClick={() => setStep(1)} style={{
+          background: C.accent, color: '#fff', border: 'none', borderRadius: 12,
+          padding: '16px 36px', fontSize: 16, fontWeight: 500, cursor: 'pointer',
+          fontFamily: 'inherit',
+        }}>
+          Get started →
+        </button>
+        <p style={{ fontSize: 11, color: C.textMuted, marginTop: 16 }}>
+          Free · No account needed · Usually takes less than a minute
+        </p>
+      </div>
     </div>
   );
 
-  // ── Wizard step wrapper (shared padding + responsive) ──────────────────
-
-  function StepWrap({ children }: { children: React.ReactNode }) {
-    return (
-      <div className="px-5 py-8 sm:px-10 lg:px-12 lg:py-10" style={{ maxWidth: 600 }}>
-        {children}
-      </div>
-    );
-  }
-
-  // ── Step 1: Who ────────────────────────────────────────────────────────
+  // ── Wizard steps ──────────────────────────────────────────────────────
 
   const step1 = (
     <StepWrap>
@@ -505,14 +542,10 @@ export default function GiftFinderWizard() {
       <h2 style={{ fontSize: 28, fontWeight: 500, color: C.textPri, lineHeight: 1.2, marginBottom: 8 }}>
         Who&apos;s this gift for?
       </h2>
-      <p style={{ fontSize: 15, color: C.textSec, marginBottom: 28, lineHeight: 1.5 }}>
-        Pick the closest relationship.
-      </p>
+      <p style={{ fontSize: 15, color: C.textSec, marginBottom: 28, lineHeight: 1.5 }}>Pick the closest relationship.</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 36 }}>
         {RECIPIENTS.map(r => (
-          <button key={r} onClick={() => update('recipient', r)} style={chipStyle(form.recipient === r)}>
-            {r}
-          </button>
+          <button key={r} onClick={() => update('recipient', r)} style={chipStyle(form.recipient === r)}>{r}</button>
         ))}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -524,30 +557,21 @@ export default function GiftFinderWizard() {
     </StepWrap>
   );
 
-  // ── Step 2: Age ────────────────────────────────────────────────────────
-
   const step2 = (
     <StepWrap>
       <p style={{ fontSize: 11, color: C.textMuted, letterSpacing: '0.05em', marginBottom: 12 }}>STEP 2 OF 5</p>
       <h2 style={{ fontSize: 28, fontWeight: 500, color: C.textPri, lineHeight: 1.2, marginBottom: 8 }}>
         How old are they?
       </h2>
-      <p style={{ fontSize: 15, color: C.textSec, marginBottom: 28, lineHeight: 1.5 }}>
-        A specific number or a rough range works fine.
-      </p>
+      <p style={{ fontSize: 15, color: C.textSec, marginBottom: 28, lineHeight: 1.5 }}>A specific number or a rough range works fine.</p>
       <input
-        type="text"
-        placeholder="42"
-        value={form.age}
+        type="text" placeholder="42" value={form.age}
         onChange={e => update('age', e.target.value)}
-        autoFocus
-        className="dark-input"
+        autoFocus className="dark-input"
         style={{
-          background: C.surface, border: `1px solid ${C.border}`,
-          color: C.textPri, borderRadius: 14,
-          padding: '18px 22px', fontSize: 32, fontWeight: 500,
-          width: 200, display: 'block', marginBottom: 8,
-          fontFamily: 'inherit', letterSpacing: '-0.01em',
+          background: C.surface, border: `1px solid ${C.border}`, color: C.textPri,
+          borderRadius: 14, padding: '18px 22px', fontSize: 32, fontWeight: 500,
+          width: 200, display: 'block', marginBottom: 8, fontFamily: 'inherit', letterSpacing: '-0.01em',
         }}
       />
       <p style={{ fontSize: 13, color: C.textMuted, marginBottom: 36 }}>e.g. 35, mid-40s, 8</p>
@@ -560,22 +584,16 @@ export default function GiftFinderWizard() {
     </StepWrap>
   );
 
-  // ── Step 3: Occasion ───────────────────────────────────────────────────
-
   const step3 = (
     <StepWrap>
       <p style={{ fontSize: 11, color: C.textMuted, letterSpacing: '0.05em', marginBottom: 12 }}>STEP 3 OF 5</p>
       <h2 style={{ fontSize: 28, fontWeight: 500, color: C.textPri, lineHeight: 1.2, marginBottom: 8 }}>
         What&apos;s the occasion?
       </h2>
-      <p style={{ fontSize: 15, color: C.textSec, marginBottom: 28, lineHeight: 1.5 }}>
-        Pick the one that fits best.
-      </p>
+      <p style={{ fontSize: 15, color: C.textSec, marginBottom: 28, lineHeight: 1.5 }}>Pick the one that fits best.</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 36 }}>
         {OCCASIONS.map(o => (
-          <button key={o} onClick={() => update('occasion', o)} style={chipStyle(form.occasion === o)}>
-            {o}
-          </button>
+          <button key={o} onClick={() => update('occasion', o)} style={chipStyle(form.occasion === o)}>{o}</button>
         ))}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -586,8 +604,6 @@ export default function GiftFinderWizard() {
       </div>
     </StepWrap>
   );
-
-  // ── Step 4: About + Level ──────────────────────────────────────────────
 
   const step4 = (
     <StepWrap>
@@ -600,16 +616,13 @@ export default function GiftFinderWizard() {
       </p>
       <textarea
         placeholder="e.g. obsessed with cooking and craft beer, loves camping, recently got into woodworking…"
-        value={form.interests}
-        onChange={e => update('interests', e.target.value)}
-        rows={4}
-        className="dark-textarea"
+        value={form.interests} onChange={e => update('interests', e.target.value)}
+        rows={4} className="dark-textarea"
         style={{
-          background: C.surface, border: `1px solid ${C.border}`,
-          color: C.textPri, borderRadius: 14,
-          padding: '14px 16px', fontSize: 14,
-          width: '100%', fontFamily: 'inherit', resize: 'none',
-          lineHeight: 1.6, marginBottom: 6, display: 'block',
+          background: C.surface, border: `1px solid ${C.border}`, color: C.textPri,
+          borderRadius: 14, padding: '14px 16px', fontSize: 14,
+          width: '100%', fontFamily: 'inherit', resize: 'none', lineHeight: 1.6,
+          marginBottom: 6, display: 'block',
         }}
       />
       <p style={{ fontSize: 12, color: C.textMuted, marginBottom: 24 }}>More specific = better results</p>
@@ -630,8 +643,6 @@ export default function GiftFinderWizard() {
       </div>
     </StepWrap>
   );
-
-  // ── Step 5: Adventurousness + Count ───────────────────────────────────
 
   const step5 = (
     <StepWrap>
@@ -665,10 +676,7 @@ export default function GiftFinderWizard() {
       <p style={{ fontSize: 13, color: C.textSec, marginBottom: 10 }}>How many ideas?</p>
       <div style={{ display: 'flex', gap: 8, marginBottom: 36 }}>
         {COUNT_OPTIONS.map(c => (
-          <button key={c} onClick={() => update('count', c)} style={{
-            ...chipStyle(form.count === c),
-            padding: '8px 20px', fontSize: 14,
-          }}>
+          <button key={c} onClick={() => update('count', c)} style={{ ...chipStyle(form.count === c), padding: '8px 20px', fontSize: 14 }}>
             {c}
           </button>
         ))}
@@ -677,8 +685,7 @@ export default function GiftFinderWizard() {
         <button onClick={() => setStep(4)} style={backBtn}>← Back</button>
         <button onClick={handleSubmit} style={{
           background: C.accent, color: '#fff', border: 'none', borderRadius: 12,
-          padding: '14px 36px', fontSize: 16, fontWeight: 500, cursor: 'pointer',
-          fontFamily: 'inherit',
+          padding: '14px 36px', fontSize: 16, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
         }}>
           Find gift ideas
         </button>
@@ -686,12 +693,12 @@ export default function GiftFinderWizard() {
     </StepWrap>
   );
 
-  // ── Loading screen ─────────────────────────────────────────────────────
+  // ── Loading skeleton (right pane only) ────────────────────────────────
 
-  const loadingScreen = (
+  const loadingSkeleton = (
     <div className="px-5 py-8 sm:px-10 lg:px-12">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4" style={{ maxWidth: 680, marginBottom: 16 }}>
-        {Array.from({ length: form.count > 6 ? 6 : 4 }).map((_, i) => (
+        {Array.from({ length: 6 }).map((_, i) => (
           <div key={i} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
             <div style={{ width: 48, height: 48, background: '#22222e', borderRadius: '50%' }} className="animate-pulse" />
             <div style={{ width: '70%', height: 14, background: '#22222e', borderRadius: 6 }} className="animate-pulse" />
@@ -710,7 +717,7 @@ export default function GiftFinderWizard() {
 
   const resultsContent = (
     <div className="px-5 py-6 sm:px-8 lg:px-10">
-      {/* Mobile: summary + filter strip */}
+      {/* Mobile filter strip */}
       <div className="lg:hidden" style={{ marginBottom: 20 }}>
         <p style={{ fontSize: 13, color: C.textPri, fontWeight: 500, marginBottom: 10 }}>
           {totalVisible} ideas for {form.recipient}, {form.age} · {form.occasion}
@@ -726,7 +733,7 @@ export default function GiftFinderWizard() {
         </div>
       </div>
 
-      {/* Desktop: results header */}
+      {/* Desktop header */}
       <div className="hidden lg:flex" style={{ alignItems: 'baseline', gap: 12, marginBottom: 24 }}>
         <h2 style={{ fontSize: 18, fontWeight: 500, color: C.textPri }}>
           Gift ideas for {form.recipient}
@@ -737,16 +744,17 @@ export default function GiftFinderWizard() {
         </span>
       </div>
 
-      {visibleThemes.length > 0 ? (
-        visibleThemes.map(theme => (
-          <GiftThemeSection key={theme.id} theme={theme} />
-        ))
-      ) : (
-        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: '40px 24px', textAlign: 'center' }}>
-          <p style={{ fontSize: 14, color: C.textSec }}>
-            No gifts match the current filters. Try widening the price range or changing the adventurousness setting.
-          </p>
-        </div>
+      {/* Refreshing overlay skeleton */}
+      {refreshing ? loadingSkeleton : (
+        visibleThemes.length > 0 ? (
+          visibleThemes.map(theme => <GiftThemeSection key={theme.id} theme={theme} />)
+        ) : (
+          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: '40px 24px', textAlign: 'center' }}>
+            <p style={{ fontSize: 14, color: C.textSec }}>
+              No gifts match the current filters. Try widening the price range or changing the adventurousness setting.
+            </p>
+          </div>
+        )
       )}
 
       <footer style={{ marginTop: 48, paddingTop: 24, borderTop: `1px solid #16161e`, textAlign: 'center' }}>
@@ -759,17 +767,18 @@ export default function GiftFinderWizard() {
 
   // ── Root render ────────────────────────────────────────────────────────
 
+  const showSidebar    = isWizardStep || step === 'loading' || step === 'results';
+  const useWizardPanel = isWizardStep || step === 'loading';
+
   return (
     <div className="min-h-screen" style={{ backgroundColor: C.bg, color: C.textPri }}>
       {navBar}
 
-      {/* Landing */}
       {step === 0 && landingScreen}
 
-      {/* Wizard steps + loading + results — two-pane on desktop */}
       {step !== 0 && (
-        <div className={isWizardStep || step === 'results' ? 'lg:flex' : ''}>
-          {isWizardStep   && wizardSidebar}
+        <div className={showSidebar ? 'lg:flex' : ''}>
+          {useWizardPanel  && wizardSidebar}
           {step === 'results' && resultsSidebar}
           <div style={{ flex: 1, minHeight: 'calc(100vh - 52px)' }}>
             {step === 1         && step1}
@@ -777,7 +786,7 @@ export default function GiftFinderWizard() {
             {step === 3         && step3}
             {step === 4         && step4}
             {step === 5         && step5}
-            {step === 'loading' && loadingScreen}
+            {step === 'loading' && loadingSkeleton}
             {step === 'results' && resultsContent}
           </div>
         </div>
