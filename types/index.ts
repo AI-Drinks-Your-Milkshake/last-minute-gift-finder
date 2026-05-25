@@ -1,17 +1,39 @@
 export interface GiftIdea {
   title: string;
   description: string;
-  priceRange: string;
+  priceRange: string;   // human-readable, e.g. "$75–$300"
+  priceMin: number;     // numeric lower bound for filtering
+  priceMax: number;     // numeric upper bound for filtering
   searchTerms: string;
   emoji: string;
 }
 
-export interface SearchFormData {
-  recipient: string; // e.g. "Mom", "Son", "Friend" — from dropdown
+export interface GiftTheme {
+  id: string;                       // slug, used as React key
+  label: string;                    // display header, e.g. "For e-scooter fans"
+  relatednessLevel: 1 | 2 | 3;      // 1 = direct, 2 = adjacent, 3 = exploratory
+  gifts: GiftIdea[];
+}
+
+// What the API receives. This is the ONLY thing serialized to /api/search.
+export interface SearchApiRequest {
+  recipient: string;
   age: string;
   occasion: string;
   interests: string;
+  count: 6 | 9 | 12;
+  priceMin: number;
+  priceMax: number;
+  level: 'casual' | 'interested' | 'enthusiast';
 }
+
+// Frontend-only display preferences. NOT sent to the API.
+export interface DisplayPrefs {
+  relatedness: 'similar' | 'mixed' | 'adventurous';
+}
+
+// Full form state = API request + display prefs.
+export type SearchFormData = SearchApiRequest & DisplayPrefs;
 
 export interface RecentSearch {
   id: string;

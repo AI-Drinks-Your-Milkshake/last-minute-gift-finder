@@ -23,9 +23,9 @@ function getPriceTier(priceRange: string): PriceTier {
 }
 
 const BADGE: Record<PriceTier, { label: string; bg: string; color: string }> = {
-  budget:  { label: 'Budget pick', bg: '#dcfce7', color: '#15803d' },
-  mid:     { label: 'Mid-range',   bg: '#fef3c7', color: '#b45309' },
-  splurge: { label: 'Splurge',     bg: '#fee2e2', color: '#c2410c' },
+  budget:  { label: 'Budget pick', bg: 'var(--tier-budget-bg)',  color: 'var(--tier-budget-text)' },
+  mid:     { label: 'Mid-range',   bg: 'var(--tier-mid-bg)',     color: 'var(--tier-mid-text)' },
+  splurge: { label: 'Splurge',     bg: 'var(--tier-splurge-bg)', color: 'var(--tier-splurge-text)' },
 };
 
 export default function GiftCard({ gift }: Props) {
@@ -35,13 +35,18 @@ export default function GiftCard({ gift }: Props) {
 
   return (
     <div
-      className="group flex flex-col rounded-2xl bg-white transition-all duration-200 hover:-translate-y-1"
-      style={{ boxShadow: '0 2px 12px rgba(0,0,0,0.07)' }}
+      className="group flex flex-col rounded-2xl transition-all duration-200 hover:-translate-y-1"
+      style={{
+        backgroundColor: 'var(--surface-card)',
+        border: '1px solid var(--border-raise)',
+        boxShadow: '0 2px 12px rgba(0,0,0,0.35)',
+      }}
       onMouseEnter={(e) => {
-        (e.currentTarget as HTMLDivElement).style.boxShadow = '0 8px 28px rgba(0,0,0,0.12)';
+        (e.currentTarget as HTMLDivElement).style.boxShadow =
+          '0 10px 28px rgba(0,0,0,0.55), 0 0 0 1px rgba(232,114,74,0.18)';
       }}
       onMouseLeave={(e) => {
-        (e.currentTarget as HTMLDivElement).style.boxShadow = '0 2px 12px rgba(0,0,0,0.07)';
+        (e.currentTarget as HTMLDivElement).style.boxShadow = '0 2px 12px rgba(0,0,0,0.35)';
       }}
     >
       {/* Body */}
@@ -50,11 +55,18 @@ export default function GiftCard({ gift }: Props) {
         <div className="mb-4 text-5xl leading-none select-none">{gift.emoji || '🎁'}</div>
 
         {/* Title */}
-        <h3 className="mb-2 text-sm font-bold leading-snug text-gray-900">{gift.title}</h3>
+        <h3
+          className="mb-2 text-sm font-bold leading-snug"
+          style={{ color: '#e0e0f0' }}
+        >
+          {gift.title}
+        </h3>
 
         {/* Price + tier badge */}
         <div className="mb-3 flex flex-wrap items-center justify-center gap-2">
-          <span className="text-sm font-semibold text-gray-800">{gift.priceRange}</span>
+          <span className="text-sm font-semibold" style={{ color: 'var(--text-soft)' }}>
+            {gift.priceRange}
+          </span>
           <span
             className="rounded-full px-2.5 py-0.5 text-xs font-semibold"
             style={{ backgroundColor: bg, color }}
@@ -64,7 +76,9 @@ export default function GiftCard({ gift }: Props) {
         </div>
 
         {/* Description */}
-        <p className="flex-1 text-sm leading-relaxed text-gray-500">{gift.description}</p>
+        <p className="flex-1 text-sm leading-relaxed" style={{ color: '#7a7a92' }}>
+          {gift.description}
+        </p>
       </div>
 
       {/* Amazon CTA */}
@@ -73,8 +87,8 @@ export default function GiftCard({ gift }: Props) {
           href={amazonUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 active:opacity-80"
-          style={{ background: 'linear-gradient(135deg, #e8724a 0%, #c85e35 100%)' }}
+          className="flex w-full items-center justify-center gap-1.5 rounded-lg py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 active:opacity-80"
+          style={{ backgroundColor: 'var(--accent)' }}
         >
           Search on Amazon
           <svg
