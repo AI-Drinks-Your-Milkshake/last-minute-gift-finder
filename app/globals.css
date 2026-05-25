@@ -160,3 +160,9 @@ select option {
   background-color: var(--surface);
   color: var(--text-primary);
 }
+
+/* Dark-themed input/textarea placeholder colour for the wizard */
+.dark-input::placeholder,
+.dark-textarea::placeholder {
+  color: #44445a;
+}
