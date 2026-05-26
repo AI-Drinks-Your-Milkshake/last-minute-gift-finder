@@ -4,7 +4,8 @@ import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { addRecentSearch } from '@/lib/kv';
 import { enrichThemesWithImages } from '@/lib/product-images';
 
-const VALID_COUNTS = [6, 9, 12] as const;
+const COUNT_MIN = 3;
+const COUNT_MAX = 15;
 const VALID_LEVELS = ['casual', 'interested', 'enthusiast'] as const;
 
 type Level = (typeof VALID_LEVELS)[number];
@@ -67,8 +68,13 @@ export async function POST(request: NextRequest) {
   }
 
   const count = body.count;
-  if (typeof count !== 'number' || !VALID_COUNTS.includes(count as 6 | 9 | 12)) {
-    return badRequest('Invalid count. Must be 6, 9, or 12.');
+  if (
+    typeof count !== 'number' ||
+    !Number.isInteger(count) ||
+    count < COUNT_MIN ||
+    count > COUNT_MAX
+  ) {
+    return badRequest(`Invalid count. Must be an integer between ${COUNT_MIN} and ${COUNT_MAX}.`);
   }
 
   const priceMin = body.priceMin;

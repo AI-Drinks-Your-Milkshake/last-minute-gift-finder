@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 
 const C = {
   bg:        '#0d0d11',
@@ -45,8 +46,22 @@ export default function BetaPage() {
     <div style={{
       minHeight: '100vh', backgroundColor: C.bg, color: C.textPri,
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      padding: '40px 24px', fontFamily: 'inherit',
+      padding: '40px 24px', fontFamily: 'inherit', position: 'relative',
     }}>
+      {/* Sign in link — top right */}
+      <Link
+        href="/app/login"
+        style={{
+          position: 'absolute', top: 24, right: 28,
+          fontSize: 13, fontWeight: 500, color: C.textSec,
+          textDecoration: 'none', padding: '8px 16px',
+          border: `1px solid ${C.border}`, borderRadius: 10,
+          background: C.surface, transition: 'color 0.15s, border-color 0.15s',
+        }}
+      >
+        Sign in →
+      </Link>
+
       <div style={{ maxWidth: 480, width: '100%' }}>
 
         {/* Logo */}

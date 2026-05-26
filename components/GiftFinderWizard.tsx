@@ -32,13 +32,12 @@ const VIBES: Array<{ value: SearchFormData['relatedness']; label: string; desc: 
   { value: 'adventurous', label: 'Surprise me',    desc: 'Unexpected ideas that open new doors' },
 ];
 
-const COUNT_OPTIONS = [6, 9, 12] as const;
 const PRICE_MIN  = 0;
 const PRICE_MAX  = 1500;
 const PRICE_STEP = 25;
 const COUNT_MIN  = 3;
 const COUNT_MAX  = 15;
-const COUNT_STEP = 3;
+const COUNT_STEP = 1;
 const STEP_NAMES = ['Who', 'Age', 'Occasion', 'About them', 'Adventurousness'];
 
 const TAGLINE = 'Strix. n. Owl genus. Large eyes, binocular vision, sharp in the dark.';
@@ -92,8 +91,10 @@ export default function GiftFinderWizard() {
   const [error,          setError]          = useState<string | null>(null);
   const [resultForm,     setResultForm]     = useState<SearchFormData>(DEFAULT_FORM);
   const [refreshing,     setRefreshing]     = useState(false);
-  const [committedLevel, setCommittedLevel] = useState<SearchFormData['level']>('interested');
-  const [committedCount, setCommittedCount] = useState<number>(9);
+  const [committedLevel,    setCommittedLevel]    = useState<SearchFormData['level']>('interested');
+  const [committedCount,    setCommittedCount]    = useState<number>(9);
+  const [committedPriceMin, setCommittedPriceMin] = useState<number>(0);
+  const [committedPriceMax, setCommittedPriceMax] = useState<number>(1500);
 
   // ── Form helpers ──
 
@@ -140,6 +141,8 @@ export default function GiftFinderWizard() {
       setResultForm({ ...form });
       setCommittedLevel(form.level);
       setCommittedCount(form.count);
+      setCommittedPriceMin(form.priceMin);
+      setCommittedPriceMax(form.priceMax);
       setStep('results');
     } catch {
       setError('Network error. Please check your connection and try again.');
@@ -154,8 +157,10 @@ export default function GiftFinderWizard() {
     try {
       const { relatedness: _r, ...apiBody } = {
         ...form,
-        level: resultForm.level,
-        count: resultForm.count,
+        level:    resultForm.level,
+        count:    resultForm.count,
+        priceMin: resultForm.priceMin,
+        priceMax: resultForm.priceMax,
       };
       const res  = await fetch('/api/search', {
         method:  'POST',
@@ -167,12 +172,24 @@ export default function GiftFinderWizard() {
       setThemes(data.themes);
       setCommittedLevel(resultForm.level);
       setCommittedCount(resultForm.count);
+      setCommittedPriceMin(resultForm.priceMin);
+      setCommittedPriceMax(resultForm.priceMax);
     } finally {
       setRefreshing(false);
     }
   }
 
-  const needsRefresh = resultForm.level !== committedLevel || resultForm.count !== committedCount;
+  // The refresh button appears whenever a filter change WIDENS the search beyond
+  // what the model was originally asked for — those changes can't be satisfied by
+  // the existing result set and require a re-fetch. Narrowing changes (lower
+  // count, tighter price range, less adventurous) are applied live by the
+  // visibleThemes filter below without hitting the API. Relatedness is purely
+  // client-side (all themes are always fetched), so it never triggers refresh.
+  const needsRefresh =
+    resultForm.level    !== committedLevel    ||
+    resultForm.count     >  committedCount    ||
+    resultForm.priceMin  <  committedPriceMin ||
+    resultForm.priceMax  >  committedPriceMax;
 
   // ── Filtered results ──
 
@@ -724,13 +741,23 @@ export default function GiftFinderWizard() {
           </button>
         ))}
       </div>
-      <p style={{ fontSize: 13, color: C.textSec, marginBottom: 10 }}>How many ideas?</p>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 36 }}>
-        {COUNT_OPTIONS.map(c => (
-          <button key={c} onClick={() => update('count', c)} style={{ ...chipStyle(form.count === c), padding: '8px 20px', fontSize: 14 }}>
-            {c}
-          </button>
-        ))}
+      <div style={{ marginBottom: 36, maxWidth: 480 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+          <p style={{ fontSize: 13, color: C.textSec }}>How many ideas?</p>
+          <span style={{ fontSize: 13, color: C.textPri, fontWeight: 500 }}>{form.count}</span>
+        </div>
+        <input
+          type="range"
+          min={COUNT_MIN} max={COUNT_MAX} step={COUNT_STEP}
+          value={form.count}
+          onChange={e => update('count', Number(e.target.value))}
+          style={{ width: '100%', accentColor: C.accent }}
+          aria-label="How many ideas"
+        />
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+          <span style={{ fontSize: 11, color: C.textMuted }}>{COUNT_MIN}</span>
+          <span style={{ fontSize: 11, color: C.textMuted }}>{COUNT_MAX}</span>
+        </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
         <button onClick={() => setStep(4)} style={backBtn}>← Back</button>
