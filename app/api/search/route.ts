@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getGiftIdeas } from '@/lib/anthropic';
-import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
 import { addRecentSearch } from '@/lib/kv';
 import { enrichThemesWithImages } from '@/lib/product-images';
 
@@ -14,42 +13,10 @@ function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
 }
 
-/**
- * Returns true if the request carries the owner-bypass cookie matching
- * OWNER_BYPASS_TOKEN. The cookie is installed via the /api/owner magic URL.
- * Falsy if either the env var is unset or the cookie is missing/wrong.
- */
-function isOwnerBypass(request: NextRequest): boolean {
-  const expected = process.env.OWNER_BYPASS_TOKEN;
-  if (!expected) return false;
-  return request.cookies.get('strix_owner')?.value === expected;
-}
-
 export async function POST(request: NextRequest) {
-  const ip = getClientIp(request);
-  const ownerBypass = isOwnerBypass(request);
-
-  // Rate limit check — fail open so KV errors don't break the app.
-  // Owners with the bypass cookie skip the check entirely.
-  let rateLimitRemaining = 5;
-  if (!ownerBypass) {
-    try {
-      const { allowed, remaining } = await checkRateLimit(ip);
-      rateLimitRemaining = remaining;
-
-      if (!allowed) {
-        return NextResponse.json(
-          { error: 'You have reached the limit of 5 searches per day. Please try again tomorrow.' },
-          { status: 429, headers: { 'X-RateLimit-Remaining': '0' } },
-        );
-      }
-    } catch (err) {
-      console.error('Rate limit check failed:', err);
-    }
-  } else {
-    // Sentinel value surfaced to the client header — purely cosmetic
-    rateLimitRemaining = 999;
-  }
+  // No per-user rate limit — access to the wizard is gated by the login
+  // middleware in middleware.ts, so only authenticated users can reach
+  // this endpoint via the UI.
 
   let body: Record<string, unknown>;
   try {
@@ -118,10 +85,7 @@ export async function POST(request: NextRequest) {
       timestamp: Date.now(),
     }).catch((err) => console.error('Failed to save recent search:', err));
 
-    return NextResponse.json(
-      { themes },
-      { headers: { 'X-RateLimit-Remaining': String(rateLimitRemaining - 1) } },
-    );
+    return NextResponse.json({ themes });
   } catch (err) {
     console.error('Gift search error:', err);
     return NextResponse.json(
