@@ -90,6 +90,9 @@ function voiceOverlayFor(recipient: string): string {
 function isValidGift(g: unknown): g is GiftIdea {
   if (!g || typeof g !== 'object') return false;
   const x = g as Record<string, unknown>;
+  // Category is checked separately (and coerced) after validation so that
+  // a sensible-but-out-of-enum value like "Gaming" doesn't blow up the
+  // whole response. Here we only require the field to exist as a string.
   return (
     typeof x.title === 'string' && x.title.length > 0 &&
     typeof x.description === 'string' && x.description.length > 0 &&
@@ -99,9 +102,14 @@ function isValidGift(g: unknown): g is GiftIdea {
     (x.priceMax as number) >= (x.priceMin as number) &&
     typeof x.searchTerms === 'string' && x.searchTerms.length > 0 &&
     typeof x.emoji === 'string' && x.emoji.length > 0 &&
-    typeof x.category === 'string' &&
-    GIFT_CATEGORIES.includes(x.category as GiftCategory)
+    typeof x.category === 'string'
   );
+}
+
+// Coerce any unknown category value to "Other" so the card just hides the
+// chip rather than the whole response failing validation.
+function coerceCategory(c: string): GiftCategory {
+  return (GIFT_CATEGORIES as readonly string[]).includes(c) ? (c as GiftCategory) : 'Other';
 }
 
 function isValidTheme(t: unknown): t is GiftTheme {
@@ -169,14 +177,18 @@ Respond with ONLY the JSON object. Start your response with { and end with }. No
 
   const response = await anthropic.messages.create({
     model: MODEL,
-    max_tokens: 4000,
+    // Sonnet's responses for 15 gifts × 3 themes with category + description
+    // come in around 3500 tokens. 5000 gives headroom; truncation would
+    // silently break JSON parsing downstream.
+    max_tokens: 5000,
     temperature: 0.85,
     system: systemPrompt,
     messages: [
       { role: 'user', content: userPrompt },
-      // Prefill the assistant turn with `{` to force a JSON-object response.
-      // The model continues from this prefix, so we prepend `{` before parsing.
-      { role: 'assistant', content: '{' },
+      // Note: Sonnet 4.6 (and other newer "reasoning-capable" models) reject
+      // assistant-message prefill with "This model does not support assistant
+      // message prefill." The prompt itself forces JSON-only output, and the
+      // parser below strips any stray fences or preamble defensively.
     ],
   });
 
@@ -184,7 +196,20 @@ Respond with ONLY the JSON object. Start your response with { and end with }. No
   if (!first || first.type !== 'text') {
     throw new Error('Empty or non-text response from Anthropic');
   }
-  const content = '{' + first.text;
+
+  // Defensive parse: trim whitespace, strip ```json fences if Sonnet adds
+  // them despite the prompt, and extract from first `{` to last `}` so any
+  // stray preamble or trailing prose doesn't break JSON.parse.
+  let raw = first.text.trim();
+  if (raw.startsWith('```')) {
+    raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  }
+  const firstBrace = raw.indexOf('{');
+  const lastBrace = raw.lastIndexOf('}');
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+    throw new Error('Anthropic response contained no JSON object');
+  }
+  const content = raw.slice(firstBrace, lastBrace + 1);
 
   let parsed: unknown;
   try {
@@ -206,5 +231,14 @@ Respond with ONLY the JSON object. Start your response with { and end with }. No
     throw new Error('One or more themes failed validation');
   }
 
-  return themesRaw as GiftTheme[];
+  // Coerce any out-of-enum category values to "Other" — done after validation
+  // because validation now allows any string for category.
+  const themes = themesRaw as GiftTheme[];
+  for (const t of themes) {
+    for (const g of t.gifts) {
+      g.category = coerceCategory(g.category);
+    }
+  }
+
+  return themes;
 }
