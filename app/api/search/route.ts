@@ -2,10 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getGiftIdeas } from '@/lib/anthropic';
 import { addRecentSearch } from '@/lib/kv';
 import { enrichThemesWithImages } from '@/lib/product-images';
+import { getTrendingProducts } from '@/lib/trends';
+import { AESTHETIC_VALUES } from '@/lib/aesthetics';
 
 const COUNT_MIN = 3;
 const COUNT_MAX = 15;
 const VALID_LEVELS = ['casual', 'interested', 'enthusiast'] as const;
+const MAX_VIBES = 2;
 
 type Level = (typeof VALID_LEVELS)[number];
 
@@ -59,7 +62,36 @@ export async function POST(request: NextRequest) {
     return badRequest('Invalid level.');
   }
 
+  // Optional vibes — must be an array of strings from AESTHETIC_VALUES,
+  // with at most MAX_VIBES entries. Reject malformed values rather than
+  // silently dropping them so the client surfaces the bug.
+  let vibes: string[] | undefined;
+  if (body.vibes !== undefined) {
+    if (!Array.isArray(body.vibes)) {
+      return badRequest('Invalid vibes — must be an array.');
+    }
+    if (body.vibes.length > MAX_VIBES) {
+      return badRequest(`Too many vibes selected. Max ${MAX_VIBES}.`);
+    }
+    if (!body.vibes.every((v) => typeof v === 'string' && AESTHETIC_VALUES.includes(v))) {
+      return badRequest('Invalid vibe value.');
+    }
+    vibes = body.vibes as string[];
+  }
+
   try {
+    // Fetch currently-trending product names via Brave Web Search, then feed
+    // them into the Claude prompt as in-context examples. Patches Claude's
+    // training cutoff (Aug 2025 for Sonnet 4.6 vs. today). Failures are
+    // silent — getTrendingProducts() returns [] if Brave is unconfigured or
+    // the call fails, and the main flow proceeds without trending hints.
+    const trendingProducts = await getTrendingProducts({
+      recipient,
+      occasion,
+      interests,
+      vibes,
+    });
+
     const themes = await getGiftIdeas({
       recipient,
       age,
@@ -69,6 +101,8 @@ export async function POST(request: NextRequest) {
       priceMin,
       priceMax,
       level: level as Level,
+      vibes,
+      trendingProducts,
     });
 
     // Enrich each gift with a product image URL via Brave Image Search +

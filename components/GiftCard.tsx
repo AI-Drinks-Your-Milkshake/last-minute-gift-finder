@@ -91,7 +91,7 @@ export default function GiftCard({ gift }: Props) {
           {gift.title}
         </h3>
 
-        {/* Price + tier badge */}
+        {/* Price + tier badge + category chip */}
         <div className="mb-3 flex flex-wrap items-center justify-center gap-2">
           <span className="text-sm font-semibold" style={{ color: 'var(--text-soft)' }}>
             {gift.priceRange}
@@ -102,6 +102,18 @@ export default function GiftCard({ gift }: Props) {
           >
             {label}
           </span>
+          {gift.category && gift.category !== 'Other' && (
+            <span
+              className="rounded-full px-2.5 py-0.5 text-xs font-medium"
+              style={{
+                backgroundColor: 'var(--surface)',
+                color: 'var(--text-secondary)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              {gift.category}
+            </span>
+          )}
         </div>
 
         {/* Description */}

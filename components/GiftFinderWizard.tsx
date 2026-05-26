@@ -3,22 +3,9 @@
 import { useState, useMemo } from 'react';
 import type { GiftTheme, SearchFormData } from '@/types';
 import GiftThemeSection from './GiftThemeSection';
-
-// ── Constants ──────────────────────────────────────────────────────────────
-
-const RECIPIENTS = [
-  'Son', 'Daughter', 'Mom', 'Dad', 'Husband', 'Wife',
-  'Boyfriend', 'Girlfriend', 'Brother', 'Sister', 'Friend',
-  'Coworker', 'Boss', 'Grandma', 'Grandpa', 'Teacher',
-  'Baby', 'Toddler', 'Teen Boy', 'Teen Girl',
-];
-
-const OCCASIONS = [
-  'Birthday', 'Holiday / Christmas', 'Anniversary',
-  "Valentine's Day", "Mother's Day", "Father's Day",
-  'Graduation', 'Wedding', 'Baby Shower',
-  'Housewarming', 'Thank You', 'Just Because', 'Other',
-];
+import { RECIPIENT_GROUPS } from '@/lib/recipients';
+import { OCCASIONS } from '@/lib/occasions';
+import { AESTHETICS } from '@/lib/aesthetics';
 
 const LEVELS: Array<{ value: SearchFormData['level']; label: string; desc: string }> = [
   { value: 'casual',     label: 'Casual',     desc: 'Dabbles occasionally, not obsessive' },
@@ -38,11 +25,14 @@ const PRICE_STEP = 25;
 const COUNT_MIN  = 3;
 const COUNT_MAX  = 15;
 const COUNT_STEP = 1;
-const STEP_NAMES = ['Who', 'Age', 'Occasion', 'About them', 'Adventurousness'];
+// Vibe is step 5 (optional). Adventurousness shifted to step 6.
+const STEP_NAMES = ['Who', 'Age', 'Occasion', 'About them', 'Vibe', 'Adventurousness'];
+const TOTAL_STEPS = STEP_NAMES.length;
+const MAX_VIBES = 2;
 
 const TAGLINE = 'Strix. n. Owl genus. Large eyes, binocular vision, sharp in the dark.';
 
-type WizardStep = 0 | 1 | 2 | 3 | 4 | 5 | 'loading' | 'results';
+type WizardStep = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 'loading' | 'results';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -60,6 +50,7 @@ const DEFAULT_FORM: SearchFormData = {
   priceMax:   1500,
   level:      'interested',
   relatedness:'mixed',
+  vibes:      [],
 };
 
 const C = {
@@ -134,7 +125,7 @@ export default function GiftFinderWizard() {
       const data = await res.json();
       if (!res.ok) {
         setError(data.error ?? 'Something went wrong. Please try again.');
-        setStep(5);
+        setStep(6);
         return;
       }
       setThemes(data.themes);
@@ -146,7 +137,7 @@ export default function GiftFinderWizard() {
       setStep('results');
     } catch {
       setError('Network error. Please check your connection and try again.');
-      setStep(5);
+      setStep(6);
     }
   }
 
@@ -221,15 +212,18 @@ export default function GiftFinderWizard() {
 
   // ── Step metadata ──
 
-  const isWizardStep = typeof step === 'number' && step >= 1 && step <= 5;
+  const isWizardStep = typeof step === 'number' && step >= 1 && step <= TOTAL_STEPS;
   const wizardStep   = isWizardStep ? (step as number) : 0;
-  const displayStep  = step === 'loading' ? 6 : wizardStep;
+  const displayStep  = step === 'loading' ? TOTAL_STEPS + 1 : wizardStep;
 
   const stepValues = [
     form.recipient,
     form.age,
     form.occasion,
     form.interests.length > 35 ? form.interests.slice(0, 35) + '…' : form.interests,
+    (form.vibes && form.vibes.length > 0)
+      ? AESTHETICS.filter(a => form.vibes!.includes(a.value)).map(a => a.label).join(', ')
+      : 'Skipped',
     VIBES.find(v => v.value === form.relatedness)?.label ?? '',
   ];
 
@@ -301,10 +295,10 @@ export default function GiftFinderWizard() {
           <div style={{ width: 120, height: 2, background: '#22222e', borderRadius: 2, overflow: 'hidden' }}>
             <div style={{
               height: '100%', background: C.accent, borderRadius: 2,
-              width: `${(wizardStep / 5) * 100}%`, transition: 'width 0.3s ease',
+              width: `${(wizardStep / TOTAL_STEPS) * 100}%`, transition: 'width 0.3s ease',
             }} />
           </div>
-          <span style={{ fontSize: 12, color: C.textMuted }}>{wizardStep} of 5</span>
+          <span style={{ fontSize: 12, color: C.textMuted }}>{wizardStep} of {TOTAL_STEPS}</span>
         </div>
       )}
 
@@ -606,14 +600,32 @@ export default function GiftFinderWizard() {
 
   const step1 = (
     <StepWrap>
-      <p style={{ fontSize: 11, color: C.textMuted, letterSpacing: '0.05em', marginBottom: 12 }}>STEP 1 OF 5</p>
+      <p style={{ fontSize: 11, color: C.textMuted, letterSpacing: '0.05em', marginBottom: 12 }}>STEP 1 OF {TOTAL_STEPS}</p>
       <h2 style={{ fontSize: 28, fontWeight: 500, color: C.textPri, lineHeight: 1.2, marginBottom: 8 }}>
         Who&apos;s this gift for?
       </h2>
       <p style={{ fontSize: 15, color: C.textSec, marginBottom: 28, lineHeight: 1.5 }}>Pick the closest relationship.</p>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 36 }}>
-        {RECIPIENTS.map(r => (
-          <button key={r} onClick={() => update('recipient', r)} style={chipStyle(form.recipient === r)}>{r}</button>
+      <div style={{ marginBottom: 36 }}>
+        {RECIPIENT_GROUPS.map((group) => (
+          <div key={group.id} style={{ marginBottom: 18 }}>
+            <p style={{
+              fontSize: 10, color: C.textMuted, letterSpacing: '0.08em',
+              textTransform: 'uppercase', marginBottom: 8,
+            }}>
+              {group.label}
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {group.recipients.map((r) => (
+                <button
+                  key={r}
+                  onClick={() => update('recipient', r)}
+                  style={chipStyle(form.recipient === r)}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
         ))}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -627,7 +639,7 @@ export default function GiftFinderWizard() {
 
   const step2 = (
     <StepWrap>
-      <p style={{ fontSize: 11, color: C.textMuted, letterSpacing: '0.05em', marginBottom: 12 }}>STEP 2 OF 5</p>
+      <p style={{ fontSize: 11, color: C.textMuted, letterSpacing: '0.05em', marginBottom: 12 }}>STEP 2 OF {TOTAL_STEPS}</p>
       <h2 style={{ fontSize: 28, fontWeight: 500, color: C.textPri, lineHeight: 1.2, marginBottom: 8 }}>
         How old are they?
       </h2>
@@ -654,7 +666,7 @@ export default function GiftFinderWizard() {
 
   const step3 = (
     <StepWrap>
-      <p style={{ fontSize: 11, color: C.textMuted, letterSpacing: '0.05em', marginBottom: 12 }}>STEP 3 OF 5</p>
+      <p style={{ fontSize: 11, color: C.textMuted, letterSpacing: '0.05em', marginBottom: 12 }}>STEP 3 OF {TOTAL_STEPS}</p>
       <h2 style={{ fontSize: 28, fontWeight: 500, color: C.textPri, lineHeight: 1.2, marginBottom: 8 }}>
         What&apos;s the occasion?
       </h2>
@@ -675,7 +687,7 @@ export default function GiftFinderWizard() {
 
   const step4 = (
     <StepWrap>
-      <p style={{ fontSize: 11, color: C.textMuted, letterSpacing: '0.05em', marginBottom: 12 }}>STEP 4 OF 5</p>
+      <p style={{ fontSize: 11, color: C.textMuted, letterSpacing: '0.05em', marginBottom: 12 }}>STEP 4 OF {TOTAL_STEPS}</p>
       <h2 style={{ fontSize: 28, fontWeight: 500, color: C.textPri, lineHeight: 1.2, marginBottom: 8 }}>
         Tell us about them.
       </h2>
@@ -712,9 +724,63 @@ export default function GiftFinderWizard() {
     </StepWrap>
   );
 
+  // ── Step 5 — Vibe (optional) ──────────────────────────────────────────
+  // Multi-select up to MAX_VIBES. Skippable — user can hit Continue with
+  // nothing selected. Selected vibes propagate to the API and shape the
+  // aesthetic of the recommendations.
+  const toggleVibe = (v: string) => {
+    const current = form.vibes ?? [];
+    if (current.includes(v)) {
+      update('vibes', current.filter(x => x !== v));
+    } else if (current.length < MAX_VIBES) {
+      update('vibes', [...current, v]);
+    }
+  };
+
   const step5 = (
     <StepWrap>
-      <p style={{ fontSize: 11, color: C.textMuted, letterSpacing: '0.05em', marginBottom: 12 }}>STEP 5 OF 5</p>
+      <p style={{ fontSize: 11, color: C.textMuted, letterSpacing: '0.05em', marginBottom: 12 }}>STEP 5 OF {TOTAL_STEPS}</p>
+      <h2 style={{ fontSize: 28, fontWeight: 500, color: C.textPri, lineHeight: 1.2, marginBottom: 8 }}>
+        Any vibe?
+      </h2>
+      <p style={{ fontSize: 15, color: C.textSec, marginBottom: 8, lineHeight: 1.5 }}>
+        Optional — pick up to {MAX_VIBES} aesthetics that fit them.
+      </p>
+      <p style={{ fontSize: 13, color: C.textMuted, marginBottom: 24, lineHeight: 1.5 }}>
+        Helps anchor the recommendations toward a specific look or feel. Skip if you&apos;re not sure.
+      </p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 28, maxWidth: 520 }}>
+        {AESTHETICS.map(a => {
+          const selected = (form.vibes ?? []).includes(a.value);
+          const atCap = (form.vibes ?? []).length >= MAX_VIBES && !selected;
+          return (
+            <button
+              key={a.value}
+              onClick={() => toggleVibe(a.value)}
+              disabled={atCap}
+              style={{
+                ...chipStyle(selected),
+                opacity: atCap ? 0.4 : 1,
+                cursor: atCap ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {a.label}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <button onClick={() => setStep(4)} style={backBtn}>← Back</button>
+        <button onClick={() => setStep(6)} style={continueBtn(true)}>
+          {(form.vibes ?? []).length === 0 ? 'Skip' : 'Continue'}
+        </button>
+      </div>
+    </StepWrap>
+  );
+
+  const step6 = (
+    <StepWrap>
+      <p style={{ fontSize: 11, color: C.textMuted, letterSpacing: '0.05em', marginBottom: 12 }}>STEP 6 OF {TOTAL_STEPS}</p>
       <h2 style={{ fontSize: 28, fontWeight: 500, color: C.textPri, lineHeight: 1.2, marginBottom: 8 }}>
         How adventurous?
       </h2>
@@ -760,7 +826,7 @@ export default function GiftFinderWizard() {
         </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-        <button onClick={() => setStep(4)} style={backBtn}>← Back</button>
+        <button onClick={() => setStep(5)} style={backBtn}>← Back</button>
         <button onClick={handleSubmit} style={{
           background: C.accent, color: '#fff', border: 'none', borderRadius: 12,
           padding: '14px 36px', fontSize: 16, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
@@ -869,6 +935,7 @@ export default function GiftFinderWizard() {
             {step === 3         && step3}
             {step === 4         && step4}
             {step === 5         && step5}
+            {step === 6         && step6}
             {step === 'loading' && loadingSkeleton}
             {step === 'results' && resultsContent}
           </div>

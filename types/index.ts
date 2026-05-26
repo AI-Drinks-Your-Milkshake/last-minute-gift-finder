@@ -1,3 +1,21 @@
+export type GiftCategory =
+  | 'Tech'
+  | 'Fashion'
+  | 'Beauty'
+  | 'Home'
+  | 'Outdoors'
+  | 'Food'
+  | 'Wellness'
+  | 'Experience'
+  | 'Snack'
+  | 'Stocking Stuffer'
+  | 'Other';
+
+export const GIFT_CATEGORIES: readonly GiftCategory[] = [
+  'Tech', 'Fashion', 'Beauty', 'Home', 'Outdoors',
+  'Food', 'Wellness', 'Experience', 'Snack', 'Stocking Stuffer', 'Other',
+];
+
 export interface GiftIdea {
   title: string;
   description: string;
@@ -6,6 +24,7 @@ export interface GiftIdea {
   priceMax: number;     // numeric upper bound for filtering
   searchTerms: string;
   emoji: string;
+  category: GiftCategory; // what kind of object — for the per-card chip
   // Populated server-side after Claude returns, via Brave Image Search.
   // null = lookup ran but found nothing or failed; undefined = enrichment not yet run.
   imageUrl?: string | null;
@@ -28,6 +47,9 @@ export interface SearchApiRequest {
   priceMin: number;
   priceMax: number;
   level: 'casual' | 'interested' | 'enthusiast';
+  // Optional aesthetic / vibe selections from the wizard. 0–2 entries.
+  // Values come from `lib/aesthetics.ts` (AESTHETIC_VALUES).
+  vibes?: string[];
 }
 
 // Frontend-only display preferences. NOT sent to the API.
