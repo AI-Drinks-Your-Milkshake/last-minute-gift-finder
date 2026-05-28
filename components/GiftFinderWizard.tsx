@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import type { GiftTheme, SearchFormData } from '@/types';
 import GiftThemeSection from './GiftThemeSection';
+import PinPreview from './PinPreview';
 import { RECIPIENT_GROUPS } from '@/lib/recipients';
 import { OCCASIONS } from '@/lib/occasions';
 import { AESTHETICS } from '@/lib/aesthetics';
@@ -86,6 +87,7 @@ export default function GiftFinderWizard() {
   const [committedCount,    setCommittedCount]    = useState<number>(9);
   const [committedPriceMin, setCommittedPriceMin] = useState<number>(0);
   const [committedPriceMax, setCommittedPriceMax] = useState<number>(1500);
+  const [committedVibes,    setCommittedVibes]    = useState<string[]>([]);
 
   // ── Form helpers ──
 
@@ -134,6 +136,7 @@ export default function GiftFinderWizard() {
       setCommittedCount(form.count);
       setCommittedPriceMin(form.priceMin);
       setCommittedPriceMax(form.priceMax);
+      setCommittedVibes(form.vibes ?? []);
       setStep('results');
     } catch {
       setError('Network error. Please check your connection and try again.');
@@ -152,6 +155,7 @@ export default function GiftFinderWizard() {
         count:    resultForm.count,
         priceMin: resultForm.priceMin,
         priceMax: resultForm.priceMax,
+        vibes:    resultForm.vibes ?? [],
       };
       const res  = await fetch('/api/search', {
         method:  'POST',
@@ -165,9 +169,17 @@ export default function GiftFinderWizard() {
       setCommittedCount(resultForm.count);
       setCommittedPriceMin(resultForm.priceMin);
       setCommittedPriceMax(resultForm.priceMax);
+      setCommittedVibes(resultForm.vibes ?? []);
     } finally {
       setRefreshing(false);
     }
+  }
+
+  // Compare unordered string arrays (vibes are a small set, max 2 entries)
+  function arraysDiffer(a: string[] | undefined, b: string[] | undefined): boolean {
+    const aa = (a ?? []).slice().sort().join('|');
+    const bb = (b ?? []).slice().sort().join('|');
+    return aa !== bb;
   }
 
   // The refresh button appears whenever a filter change WIDENS the search beyond
@@ -176,11 +188,16 @@ export default function GiftFinderWizard() {
   // count, tighter price range, less adventurous) are applied live by the
   // visibleThemes filter below without hitting the API. Relatedness is purely
   // client-side (all themes are always fetched), so it never triggers refresh.
+  //
+  // Vibe changes ALWAYS require a refresh — vibes shape the underlying
+  // recommendations, and there's no metadata on already-returned gifts to
+  // filter them client-side by vibe.
   const needsRefresh =
     resultForm.level    !== committedLevel    ||
     resultForm.count     >  committedCount    ||
     resultForm.priceMin  <  committedPriceMin ||
-    resultForm.priceMax  >  committedPriceMax;
+    resultForm.priceMax  >  committedPriceMax ||
+    arraysDiffer(resultForm.vibes, committedVibes);
 
   // ── Filtered results ──
 
@@ -465,6 +482,51 @@ export default function GiftFinderWizard() {
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
             <span style={{ fontSize: 11, color: C.textMuted }}>$0</span>
             <span style={{ fontSize: 11, color: C.textMuted }}>$1.5k</span>
+          </div>
+        </div>
+
+        {/* Vibe — multi-select chips (max MAX_VIBES). Optional, but any change
+            triggers a refresh because vibes shape the underlying recs. */}
+        <div style={{ marginBottom: 22 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+            <p style={{ fontSize: 12, color: C.textSec }}>Vibe</p>
+            <span style={{ fontSize: 11, color: C.textMuted }}>
+              {(resultForm.vibes ?? []).length}/{MAX_VIBES}
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {AESTHETICS.map(a => {
+              const selected = (resultForm.vibes ?? []).includes(a.value);
+              const atCap = (resultForm.vibes ?? []).length >= MAX_VIBES && !selected;
+              return (
+                <button
+                  key={a.value}
+                  onClick={() => {
+                    setResultForm(prev => {
+                      const current = prev.vibes ?? [];
+                      if (current.includes(a.value)) {
+                        return { ...prev, vibes: current.filter(v => v !== a.value) };
+                      }
+                      if (current.length >= MAX_VIBES) return prev;
+                      return { ...prev, vibes: [...current, a.value] };
+                    });
+                  }}
+                  disabled={atCap}
+                  style={{
+                    padding: '5px 11px', borderRadius: 16, fontSize: 12,
+                    border:     `1px solid ${selected ? C.textPri : C.border}`,
+                    background:  selected ? C.textPri : C.surface,
+                    color:       selected ? C.bg      : C.textSec,
+                    cursor:      atCap ? 'not-allowed' : 'pointer',
+                    opacity:     atCap ? 0.4 : 1,
+                    fontWeight:  selected ? 500 : 400,
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  {a.label}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -893,6 +955,20 @@ export default function GiftFinderWizard() {
           {totalVisible} {totalVisible === 1 ? 'idea' : 'ideas'}
         </span>
       </div>
+
+      {/* Pin preview — renders the current visible gifts in the 1000×1500
+          Pinterest pin layout, scaled down to fit. Updates live as the
+          user refines results. Uses `committedVibes` (not resultForm.vibes)
+          so the displayed themes and the pin theming stay in sync — vibe
+          changes only take effect after refresh. */}
+      {!refreshing && visibleThemes.length > 0 && (
+        <PinPreview
+          recipient={form.recipient}
+          occasion={form.occasion}
+          vibes={committedVibes}
+          themes={visibleThemes}
+        />
+      )}
 
       {refreshing ? loadingSkeleton : (
         visibleThemes.length > 0 ? (

@@ -72,54 +72,9 @@ export interface BetaSignup {
   ts:    number;   // ms epoch — when the signup landed
 }
 
-// ──────────────────────────────────────────────────────────────────────
-// Static guide pipeline (Pinterest brand-search initiative)
-// ──────────────────────────────────────────────────────────────────────
-//
-// A SearchConfig is one row in the parameter matrix. It uniquely
-// identifies a guide page (e.g. "Coquette Birthday Gifts for Teen
-// Girls") and carries everything needed to render the page, the
-// Pinterest pin, and the eventual API call to post it.
-//
-// Status lifecycle:
-//   'shell'             — generator created the row; no content yet
-//   'needs_review'      — content + pin image generated; awaiting Jason
-//   'needs_design_fix'  — sent back; template or vibe tweak required
-//   'approved'          — Jason signed off; eligible for posting
-//   'posted'            — live on Pinterest
-//
-// Persistence lives in data/search-configs.csv at the project root.
-// The CSV is the source of truth for status and human-edited metadata;
-// generated content (the GiftTheme[] for each guide) lives alongside
-// at data/content/{slug}.json.
-
-export type SearchConfigStatus =
-  | 'shell'
-  | 'needs_review'
-  | 'needs_design_fix'
-  | 'approved'
-  | 'posted';
-
-export interface SearchConfig {
-  id: string;                          // uuid
-  demographic: string;                 // slug from lib/demographics.ts
-  occasion: string;                    // matches lib/occasions.ts value
-  vibe: string | null;                 // slug from lib/aesthetics.ts; null = broad guide
-  interests: string[];                 // slugs from lib/interests.ts; [] = broad guide
-  title: string;                       // e.g. "Coquette Birthday Gifts for Teen Girls"
-  slug: string;                        // URL-safe, derived from title
-  priority: 1 | 2 | 3 | 4;             // P1-P4 from research
-  status: SearchConfigStatus;
-  pinImagePath: string | null;         // local file path to Puppeteer JPEG
-  pageUrl: string | null;              // resolved /gifts/... URL
-  pinterestPinId: string | null;       // populated after Pinterest API post
-  generatedAt: string | null;          // ISO timestamp; content generation
-  postedAt: string | null;             // ISO timestamp; Pinterest post
-  notes: string;                       // free-form, reviewer-edited
-}
-
-// Pin-grid product entry. Placeholder shape used by the pin template
-// before real content is wired in via lib/anthropic.ts.
+// Pin-grid product entry. Consumed by PinTemplate. In live operation
+// each entry maps directly from a GiftIdea — the wizard generates the
+// gifts, the preview renders them as pin products.
 export interface PinProduct {
   title: string;
   priceRange: string;

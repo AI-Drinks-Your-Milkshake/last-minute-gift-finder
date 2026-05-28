@@ -1,31 +1,27 @@
-// PinTemplate — renders one 1000×1500 Pinterest pin for a SearchConfig.
+// PinTemplate — renders one 1000×1500 Pinterest pin.
 //
-// Design philosophy: Pinterest pins live in their own visual context,
-// distinct from the dark Strix app. Reference research (May 2026) shows
-// the dominant format for teen-girl / aesthetic gift-guide pins is a
-// soft tinted background with a dense product flatlay AROUND a title
-// that sits in the vertical middle of the canvas. We match that — the
-// title is the visual anchor, products frame it top and bottom.
+// Pure presentation component. Takes the title, an eyebrow string,
+// a vibe slug (looked up in AESTHETICS for theming), and a flat list
+// of products. No knowledge of SearchConfig or static-guide pipeline —
+// the wizard's PinPreview wrapper does all the data shaping.
 //
 // Layout (top → bottom):
-//   • Top product zone (~37%): first ~40% of products in a grid
-//   • Title band (~26%): eyebrow + centered title in vibe display font
-//   • Bottom product zone (~37%): remaining products
+//   • Top product zone (~40% of remaining height): first ~40% of products
+//   • Title band (auto): eyebrow + centered title in vibe display font
+//   • Bottom product zone (~60% of remaining): remaining products
 //   • Strix mark in bottom-right (small, low opacity)
 //
 // Theming: the active vibe's `cssOverrides` are inlined as CSS custom
 // properties on the [data-pin-root] element. The template reads only
 // from CSS variables.
-//
-// Server component — no hooks, no hydration. Puppeteer targets the
-// [data-pin-root] element via element-screenshot.
 
-import type { SearchConfig, PinProduct } from '@/types';
+import type { PinProduct } from '@/types';
 import { getAesthetic } from '@/lib/aesthetics';
-import { getDemographic } from '@/lib/demographics';
 
 interface Props {
-  config: SearchConfig;
+  title: string;                // e.g. "Coquette Birthday Gifts for Teen Girls"
+  eyebrow?: string;             // e.g. "BIRTHDAY · TEEN GIRL" — already uppercased
+  vibe?: string;                // slug from AESTHETICS, or undefined for default
   products: PinProduct[];
 }
 
@@ -44,9 +40,8 @@ function gridCols(count: number): number {
 }
 
 // Split products into "above title" and "below title" zones. Slight
-// bias toward the bottom feels more visually grounded — the eye reads
-// title → products below as the actionable list. Floor-on-top puts
-// fewer items in the top zone, more in the bottom.
+// bias toward the bottom feels visually grounded — title → list flows
+// downward.
 function splitProducts<T>(products: T[]): { top: T[]; bottom: T[] } {
   const topCount = Math.floor(products.length * 0.4);
   return {
@@ -55,21 +50,20 @@ function splitProducts<T>(products: T[]): { top: T[]; bottom: T[] } {
   };
 }
 
-export default function PinTemplate({ config, products }: Props) {
-  const vibe = config.vibe ? getAesthetic(config.vibe) : undefined;
-  const demo = getDemographic(config.demographic);
+export default function PinTemplate({ title, eyebrow, vibe, products }: Props) {
+  const aesthetic = vibe ? getAesthetic(vibe) : undefined;
   const { top, bottom } = splitProducts(products);
 
   // Inline CSS custom properties from the vibe overlay. React typings
   // don't model custom properties, so cast through CSSProperties.
   const vibeStyle: React.CSSProperties = {
-    ...(vibe?.cssOverrides as React.CSSProperties),
+    ...(aesthetic?.cssOverrides as React.CSSProperties),
   };
 
   return (
     <div
       data-pin-root
-      data-vibe={config.vibe ?? 'broad'}
+      data-vibe={vibe ?? 'broad'}
       style={{
         width: PIN_WIDTH,
         height: PIN_HEIGHT,
@@ -77,11 +71,6 @@ export default function PinTemplate({ config, products }: Props) {
         color: 'var(--pin-text, #1f1f2a)',
         fontFamily: 'inherit',
         display: 'grid',
-        // Three vertical zones. Title gets `auto` height so it sizes
-        // to content; the two product zones share the remainder.
-        // Bottom zone gets a slight bias (1.05) — eye reads the title
-        // as anchored to the upper-middle rather than dead-center,
-        // which feels more intentional.
         gridTemplateRows: '1fr auto 1.05fr',
         overflow: 'hidden',
         position: 'relative',
@@ -96,35 +85,28 @@ export default function PinTemplate({ config, products }: Props) {
         style={{
           padding: '24px 56px',
           textAlign: 'center',
-          // Two subtle hairlines anchor the title between the product
-          // zones without competing with the typography. Muted text
-          // color keeps them quiet relative to the vibe accent.
           borderTop: '1px solid var(--pin-text-soft, #6a6a7a)',
           borderBottom: '1px solid var(--pin-text-soft, #6a6a7a)',
         }}
       >
-        <p
-          style={{
-            margin: 0,
-            fontSize: 17,
-            letterSpacing: '0.32em',
-            textTransform: 'uppercase',
-            color: 'var(--pin-text-soft, #6a6a7a)',
-            fontWeight: 600,
-          }}
-        >
-          {config.occasion}
-          {demo && (
-            <>
-              {' '}<span style={{ opacity: 0.5 }}>·</span>{' '}
-              {demo.label.replace(/\s*\(.*\)\s*/, '')}
-            </>
-          )}
-        </p>
+        {eyebrow && (
+          <p
+            style={{
+              margin: 0,
+              fontSize: 17,
+              letterSpacing: '0.32em',
+              textTransform: 'uppercase',
+              color: 'var(--pin-text-soft, #6a6a7a)',
+              fontWeight: 600,
+            }}
+          >
+            {eyebrow}
+          </p>
+        )}
 
         <h1
           style={{
-            margin: '14px auto 0',
+            margin: eyebrow ? '14px auto 0' : '0 auto',
             fontFamily: 'var(--font-display, inherit)',
             fontSize: 60,
             fontWeight: 600,
@@ -135,7 +117,7 @@ export default function PinTemplate({ config, products }: Props) {
             maxWidth: '90%',
           }}
         >
-          {config.title}
+          {title}
         </h1>
       </section>
 
@@ -165,9 +147,6 @@ export default function PinTemplate({ config, products }: Props) {
   );
 }
 
-// One product zone — top or bottom of the title. Both zones use the
-// same column algorithm, but the bottom zone reserves space at the
-// right edge for the Strix watermark so products don't overlap it.
 function ProductGrid({
   products,
   placement,
@@ -185,7 +164,7 @@ function ProductGrid({
         padding:
           placement === 'top'
             ? '44px 56px 28px'
-            : '28px 56px 70px', // bottom padding leaves room for Strix mark
+            : '28px 56px 70px', // leaves room for the Strix watermark
         display: 'grid',
         gridTemplateColumns: `repeat(${cols}, 1fr)`,
         gap: 24,
@@ -199,9 +178,6 @@ function ProductGrid({
   );
 }
 
-// Product cell — image when present, otherwise a tinted blob with the
-// product name as small caption. No rectangular card chrome — products
-// float on the soft pin background, matching the flatlay reference look.
 function ProductCell({ product }: { product: PinProduct }) {
   const hasImage = Boolean(product.imageUrl);
 
@@ -213,7 +189,7 @@ function ProductCell({ product }: { product: PinProduct }) {
         alignItems: 'center',
         justifyContent: 'flex-start',
         gap: 10,
-        minHeight: 0, // grid track flex fix
+        minHeight: 0,
       }}
     >
       <div
@@ -266,9 +242,7 @@ function ProductCell({ product }: { product: PinProduct }) {
   );
 }
 
-// Placeholder for products without a real image yet. Soft rounded blob
-// in the vibe accent color, slightly darker than the pin background.
-// Reads as "product silhouette" rather than "missing data".
+// Soft rounded blob shown when a product has no image yet.
 function PlaceholderBlob() {
   return (
     <div
