@@ -6,7 +6,7 @@ import { getTrendingProducts } from '@/lib/trends';
 import { AESTHETIC_VALUES } from '@/lib/aesthetics';
 
 const COUNT_MIN = 3;
-const COUNT_MAX = 15;
+const COUNT_MAX = 25;
 const VALID_LEVELS = ['casual', 'interested', 'enthusiast'] as const;
 const VALID_RELATEDNESS = ['similar', 'mixed', 'adventurous'] as const;
 const MAX_VIBES = 2;

@@ -212,10 +212,10 @@ Respond with ONLY the JSON object. Start your response with { and end with }. No
 
   const response = await anthropic.messages.create({
     model: MODEL,
-    // Sonnet's responses for 15 gifts × 3 themes with category + description
-    // come in around 3500 tokens. 5000 gives headroom; truncation would
-    // silently break JSON parsing downstream.
-    max_tokens: 5000,
+    // ~250 tokens/gift. With count=25 + mixed distribution the API generates
+    // up to 27 gifts total (13+12+1). 8000 tokens gives comfortable headroom;
+    // truncation would silently break JSON parsing downstream.
+    max_tokens: 8000,
     temperature: 0.85,
     system: systemPrompt,
     messages: [
