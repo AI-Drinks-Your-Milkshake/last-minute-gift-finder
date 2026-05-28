@@ -67,8 +67,12 @@ export default function PinTemplate({ title, eyebrow, vibe, products }: Props) {
       style={{
         width: PIN_WIDTH,
         height: PIN_HEIGHT,
-        backgroundColor: 'var(--pin-bg, #f0eee5)',
-        color: 'var(--pin-text, #1f1f2a)',
+        // Default is dark so white product-image cards pop against it.
+        // Vibe cssOverrides replace --pin-bg / --pin-text / --pin-text-soft
+        // with their own palette (light vibes → pastel bg + dark text,
+        // dark vibes → deep bg + light text). White tiles work in both cases.
+        backgroundColor: 'var(--pin-bg, #16161e)',
+        color: 'var(--pin-text, #f0f0f8)',
         fontFamily: 'inherit',
         display: 'grid',
         gridTemplateRows: '1fr auto 1.05fr',
@@ -85,8 +89,9 @@ export default function PinTemplate({ title, eyebrow, vibe, products }: Props) {
         style={{
           padding: '24px 56px',
           textAlign: 'center',
-          borderTop: '1px solid var(--pin-text-soft, #6a6a7a)',
-          borderBottom: '1px solid var(--pin-text-soft, #6a6a7a)',
+          // rgba so the divider reads on both light and dark --pin-bg values
+          borderTop: '1px solid var(--pin-text-soft, rgba(255,255,255,0.18))',
+          borderBottom: '1px solid var(--pin-text-soft, rgba(255,255,255,0.18))',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
@@ -100,7 +105,7 @@ export default function PinTemplate({ title, eyebrow, vibe, products }: Props) {
               fontSize: 17,
               letterSpacing: '0.32em',
               textTransform: 'uppercase',
-              color: 'var(--pin-text-soft, #6a6a7a)',
+              color: 'var(--pin-text-soft, rgba(255,255,255,0.55))',
               fontWeight: 600,
             }}
           >
@@ -116,7 +121,7 @@ export default function PinTemplate({ title, eyebrow, vibe, products }: Props) {
             fontWeight: 600,
             lineHeight: 1.05,
             letterSpacing: '-0.015em',
-            color: 'var(--pin-text, #1f1f2a)',
+            color: 'var(--pin-text, #f0f0f8)',
             textAlign: 'center',
             maxWidth: '90%',
           }}
@@ -140,7 +145,7 @@ export default function PinTemplate({ title, eyebrow, vibe, products }: Props) {
           fontSize: 16,
           fontWeight: 600,
           letterSpacing: '0.04em',
-          color: 'var(--pin-text-soft, #6a6a7a)',
+          color: 'var(--pin-text-soft, rgba(255,255,255,0.4))',
           opacity: 0.7,
         }}
       >
@@ -195,24 +200,24 @@ function ProductCell({ product }: { product: PinProduct }) {
   const hasImage = Boolean(product.imageUrl);
 
   return (
-    // Grid item: stretch to fill its cell (default grid behavior).
-    // Flex column so image area expands and title stays pinned at bottom.
+    // White card tile — floats on the vibe's --pin-bg regardless of whether
+    // that background is light (pastels) or dark (gamer, dark academia).
+    // Text inside is always dark so it's readable on the white card surface.
     <div
       style={{
+        background: '#ffffff',
+        borderRadius: 12,
+        overflow: 'hidden',
+        height: '100%',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        justifyContent: 'flex-start',
-        gap: 8,
-        // Clip anything that still overshoots — belt-and-suspenders.
-        overflow: 'hidden',
-        height: '100%',
-        minHeight: 0,
+        padding: '12px 12px 10px',
+        boxSizing: 'border-box',
       }}
     >
-      {/* Image area: flex:1 fills whatever height the grid row allocates.
-          No aspectRatio — that was forcing a square taller than the row,
-          causing overflow and cut-off. Images scale via objectFit:contain. */}
+      {/* Image area fills available height; no fixed aspectRatio so it never
+          overflows the grid row. */}
       <div
         style={{
           flex: 1,
@@ -236,7 +241,6 @@ function ProductCell({ product }: { product: PinProduct }) {
               height: 'auto',
               objectFit: 'contain',
               display: 'block',
-              filter: 'drop-shadow(0 6px 14px rgba(0,0,0,0.08))',
             }}
           />
         ) : (
@@ -244,15 +248,16 @@ function ProductCell({ product }: { product: PinProduct }) {
         )}
       </div>
 
+      {/* Fixed dark text — always readable on white regardless of vibe. */}
       <p
         style={{
-          margin: 0,
+          margin: '8px 0 0',
           fontSize: 13,
           lineHeight: 1.25,
           textAlign: 'center',
-          color: 'var(--pin-text-soft, #6a6a7a)',
+          color: '#2a2a3a',
           fontWeight: 500,
-          maxWidth: '92%',
+          maxWidth: '95%',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           display: '-webkit-box',
