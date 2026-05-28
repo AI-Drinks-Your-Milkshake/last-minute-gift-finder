@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import type { GiftTheme, SearchFormData } from '@/types';
 import GiftThemeSection from './GiftThemeSection';
 import PinPreview from './PinPreview';
@@ -24,7 +24,7 @@ const PRICE_MIN  = 0;
 const PRICE_MAX  = 1500;
 const PRICE_STEP = 25;
 const COUNT_MIN  = 3;
-const COUNT_MAX  = 15;
+const COUNT_MAX  = 25;
 const COUNT_STEP = 1;
 // Vibe is step 5 (optional). Adventurousness shifted to step 6.
 const STEP_NAMES = ['Who', 'Age', 'Occasion', 'About them', 'Vibe', 'Adventurousness'];
@@ -89,6 +89,32 @@ export default function GiftFinderWizard() {
   const [committedPriceMax,   setCommittedPriceMax]   = useState<number>(1500);
   const [committedVibes,      setCommittedVibes]      = useState<string[]>([]);
   const [committedRelatedness, setCommittedRelatedness] = useState<SearchFormData['relatedness']>('mixed');
+
+  // ── Display preferences (no re-fetch needed) ──
+  const [gridCols, setGridCols] = useState(4);
+  const [pinWidth, setPinWidth] = useState(340);
+
+  // Drag-to-resize for the pin column. Captures start state on mousedown,
+  // then tracks delta on mousemove until mouseup cleans up.
+  const pinDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  function handlePinDragStart(e: React.MouseEvent) {
+    e.preventDefault();
+    pinDragRef.current = { startX: e.clientX, startWidth: pinWidth };
+    const onMove = (ev: MouseEvent) => {
+      if (!pinDragRef.current) return;
+      // Dragging the left edge leftward widens the panel.
+      const delta = pinDragRef.current.startX - ev.clientX;
+      setPinWidth(Math.max(240, Math.min(700, pinDragRef.current.startWidth + delta)));
+    };
+    const onUp = () => {
+      pinDragRef.current = null;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
 
   // ── Form helpers ──
 
@@ -196,18 +222,21 @@ export default function GiftFinderWizard() {
   // recommendations, and there's no metadata on already-returned gifts to
   // filter them client-side by vibe.
   const needsRefresh =
-    resultForm.level        !== committedLevel        ||
-    resultForm.count         >  committedCount        ||
-    resultForm.priceMin      <  committedPriceMin     ||
-    resultForm.priceMax      >  committedPriceMax     ||
-    arraysDiffer(resultForm.vibes, committedVibes)    ||
-    resultForm.relatedness  !== committedRelatedness;
+    resultForm.level       !== committedLevel       ||
+    resultForm.count       !== committedCount       ||
+    resultForm.priceMin     <  committedPriceMin    ||
+    resultForm.priceMax     >  committedPriceMax    ||
+    arraysDiffer(resultForm.vibes, committedVibes)  ||
+    resultForm.relatedness !== committedRelatedness;
 
   // ── Filtered results ──
 
   const visibleThemes = useMemo<GiftTheme[]>(() => {
-    const { relatedness, priceMin, priceMax, count } = resultForm;
-    const byFilter = themes
+    const { relatedness, priceMin, priceMax } = resultForm;
+    // No count truncation — the API already returns exactly the right number
+    // of gifts for the requested count + relatedness combination. Truncating
+    // here would silently under-deliver what the user asked for.
+    return themes
       .filter(t => {
         if (relatedness === 'similar') return t.relatednessLevel === 1;
         if (relatedness === 'mixed')   return t.relatednessLevel <= 2;
@@ -217,15 +246,6 @@ export default function GiftFinderWizard() {
         ...t,
         gifts: t.gifts.filter(g => g.priceMin <= priceMax && g.priceMax >= priceMin),
       }))
-      .filter(t => t.gifts.length > 0);
-
-    let remaining = count;
-    return byFilter
-      .map(t => {
-        const toShow = Math.min(t.gifts.length, remaining);
-        remaining -= toShow;
-        return { ...t, gifts: t.gifts.slice(0, toShow) };
-      })
       .filter(t => t.gifts.length > 0);
   }, [themes, resultForm]);
 
@@ -579,7 +599,7 @@ export default function GiftFinderWizard() {
         </div>
 
         {/* Number of results — slider */}
-        <div style={{ marginBottom: 8 }}>
+        <div style={{ marginBottom: 22 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
             <p style={{ fontSize: 12, color: C.textSec }}>Number of results</p>
             <span style={{ fontSize: 12, color: C.textPri, fontWeight: 500 }}>{resultForm.count}</span>
@@ -595,6 +615,25 @@ export default function GiftFinderWizard() {
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
             <span style={{ fontSize: 11, color: C.textMuted }}>{COUNT_MIN}</span>
             <span style={{ fontSize: 11, color: C.textMuted }}>{COUNT_MAX}</span>
+          </div>
+        </div>
+
+        {/* Grid columns — display-only preference, no re-fetch */}
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+            <p style={{ fontSize: 12, color: C.textSec }}>Grid columns</p>
+            <span style={{ fontSize: 12, color: C.textPri, fontWeight: 500 }}>{gridCols}</span>
+          </div>
+          <input
+            type="range" min={1} max={10} step={1}
+            value={gridCols}
+            onChange={e => setGridCols(Number(e.target.value))}
+            style={{ width: '100%', accentColor: C.accent }}
+            aria-label="Grid columns"
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
+            <span style={{ fontSize: 11, color: C.textMuted }}>1</span>
+            <span style={{ fontSize: 11, color: C.textMuted }}>10</span>
           </div>
         </div>
 
@@ -631,10 +670,28 @@ export default function GiftFinderWizard() {
   const pinColumn = (
     <aside className="hidden lg:flex flex-col border-l flex-shrink-0"
       style={{
-        borderColor: '#16161e', width: 340,
+        borderColor: '#16161e', width: pinWidth,
         height: 'calc(100vh - 52px)', position: 'sticky', top: 52,
         overflow: 'hidden',
       }}>
+
+      {/* Relative wrapper so the absolute drag handle is positioned
+          against the panel edge rather than the viewport. */}
+      <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '100%' }}>
+
+        {/* ── Drag handle ── Grab this left edge to resize the panel. */}
+        <div
+          onMouseDown={handlePinDragStart}
+          style={{
+            position: 'absolute', left: 0, top: 0, bottom: 0, width: 6,
+            cursor: 'ew-resize', zIndex: 10,
+            background: 'transparent',
+            transition: 'background 0.15s',
+          }}
+          onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = 'rgba(232,114,74,0.25)'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+        />
+
       <div style={{ flex: 1, overflowY: 'auto', padding: '28px 20px' }}>
         <p style={{
           fontSize: 10, color: C.textMuted, letterSpacing: '0.08em',
@@ -648,7 +705,7 @@ export default function GiftFinderWizard() {
             occasion={form.occasion}
             vibes={committedVibes}
             themes={visibleThemes}
-            targetWidth={300}
+            targetWidth={pinWidth - 40}
             minimal
           />
         ) : (
@@ -659,6 +716,7 @@ export default function GiftFinderWizard() {
           </p>
         )}
       </div>
+      </div>{/* end relative wrapper */}
     </aside>
   );
 
@@ -1002,7 +1060,7 @@ export default function GiftFinderWizard() {
 
       {refreshing ? loadingSkeleton : (
         visibleThemes.length > 0 ? (
-          visibleThemes.map(theme => <GiftThemeSection key={theme.id} theme={theme} />)
+          visibleThemes.map(theme => <GiftThemeSection key={theme.id} theme={theme} cols={gridCols} />)
         ) : (
           <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: '40px 24px', textAlign: 'center' }}>
             <p style={{ fontSize: 14, color: C.textSec }}>

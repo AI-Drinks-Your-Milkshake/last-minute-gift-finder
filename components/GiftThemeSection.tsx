@@ -3,9 +3,10 @@ import GiftCard from './GiftCard';
 
 interface Props {
   theme: GiftTheme;
+  cols?: number;
 }
 
-export default function GiftThemeSection({ theme }: Props) {
+export default function GiftThemeSection({ theme, cols = 2 }: Props) {
   if (theme.gifts.length === 0) return null;
 
   const isDirect = theme.relatednessLevel === 1;
@@ -41,7 +42,7 @@ export default function GiftThemeSection({ theme }: Props) {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: 16 }}>
         {theme.gifts.map((gift, i) => (
           <GiftCard key={`${theme.id}-${i}`} gift={gift} />
         ))}
