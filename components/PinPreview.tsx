@@ -26,6 +26,10 @@ interface Props {
   // we scale it to this width. 400px ≈ 0.4 scale, fits comfortably
   // alongside results.
   targetWidth?: number;
+  // When true, omits the outer section wrapper and collapse toggle —
+  // intended for use inside a dedicated right-column panel where the
+  // column itself provides the visual container.
+  minimal?: boolean;
 }
 
 const NATIVE_WIDTH = 1000;
@@ -82,6 +86,7 @@ export default function PinPreview({
   vibes,
   themes,
   targetWidth = 400,
+  minimal = false,
 }: Props) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -106,6 +111,49 @@ export default function PinPreview({
 
   const scale = targetWidth / NATIVE_WIDTH;
   const scaledHeight = NATIVE_HEIGHT * scale;
+
+  // ── Minimal / column layout ────────────────────────────────────────────
+  // Used when the pin is rendered in a dedicated right-column panel.
+  // No outer wrapper, no collapse toggle — just the status line + canvas.
+  if (minimal) {
+    return (
+      <>
+        <p style={{ fontSize: 12, color: '#8888a2', marginBottom: 12, lineHeight: 1.5 }}>
+          {products.length > 0
+            ? `${products.length} of ${MAX_PRODUCTS} slots filled · scaled to ${Math.round(scale * 100)}%`
+            : 'No gifts yet — run a search to populate the pin.'}
+        </p>
+        {products.length > 0 && (
+          <div
+            style={{
+              width: targetWidth,
+              height: scaledHeight,
+              overflow: 'hidden',
+              position: 'relative',
+              boxShadow: '0 12px 32px rgba(0, 0, 0, 0.45)',
+              borderRadius: 8,
+            }}
+          >
+            <div
+              style={{
+                transform: `scale(${scale})`,
+                transformOrigin: 'top left',
+                width: NATIVE_WIDTH,
+                height: NATIVE_HEIGHT,
+              }}
+            >
+              <PinTemplate
+                title={title}
+                eyebrow={eyebrow}
+                vibe={vibeSlug}
+                products={products}
+              />
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
 
   return (
     <section

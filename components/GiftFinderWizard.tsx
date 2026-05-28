@@ -618,6 +618,46 @@ export default function GiftFinderWizard() {
     </aside>
   );
 
+  // ── Pin column (right panel, desktop only) ────────────────────────────
+  // Hidden on mobile to keep the results view clean. Shows the Pinterest
+  // pin preview scaled to fit the column width, updating live as the
+  // user refines results. Uses `committedVibes` so theming stays in sync
+  // with the actual fetched results — vibe changes only apply post-refresh.
+
+  const pinColumn = (
+    <aside className="hidden lg:flex flex-col border-l flex-shrink-0"
+      style={{
+        borderColor: '#16161e', width: 340,
+        height: 'calc(100vh - 52px)', position: 'sticky', top: 52,
+        overflow: 'hidden',
+      }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '28px 20px' }}>
+        <p style={{
+          fontSize: 10, color: C.textMuted, letterSpacing: '0.08em',
+          textTransform: 'uppercase', marginBottom: 16, fontWeight: 600,
+        }}>
+          Pin preview
+        </p>
+        {!refreshing && visibleThemes.length > 0 ? (
+          <PinPreview
+            recipient={form.recipient}
+            occasion={form.occasion}
+            vibes={committedVibes}
+            themes={visibleThemes}
+            targetWidth={300}
+            minimal
+          />
+        ) : (
+          <p style={{ fontSize: 13, color: C.textMuted, lineHeight: 1.6 }}>
+            {refreshing
+              ? 'Refreshing…'
+              : 'Run a search to see the Pinterest pin preview.'}
+          </p>
+        )}
+      </div>
+    </aside>
+  );
+
   // ── Landing screen ─────────────────────────────────────────────────────
 
   const landingScreen = (
@@ -956,20 +996,6 @@ export default function GiftFinderWizard() {
         </span>
       </div>
 
-      {/* Pin preview — renders the current visible gifts in the 1000×1500
-          Pinterest pin layout, scaled down to fit. Updates live as the
-          user refines results. Uses `committedVibes` (not resultForm.vibes)
-          so the displayed themes and the pin theming stay in sync — vibe
-          changes only take effect after refresh. */}
-      {!refreshing && visibleThemes.length > 0 && (
-        <PinPreview
-          recipient={form.recipient}
-          occasion={form.occasion}
-          vibes={committedVibes}
-          themes={visibleThemes}
-        />
-      )}
-
       {refreshing ? loadingSkeleton : (
         visibleThemes.length > 0 ? (
           visibleThemes.map(theme => <GiftThemeSection key={theme.id} theme={theme} />)
@@ -1005,7 +1031,7 @@ export default function GiftFinderWizard() {
         <div className={showSidebar ? 'lg:flex' : ''}>
           {useWizardPanel  && wizardSidebar}
           {step === 'results' && resultsSidebar}
-          <div style={{ flex: 1, minHeight: 'calc(100vh - 52px)' }}>
+          <div style={{ flex: 1, minWidth: 0, minHeight: 'calc(100vh - 52px)' }}>
             {step === 1         && step1}
             {step === 2         && step2}
             {step === 3         && step3}
@@ -1015,6 +1041,7 @@ export default function GiftFinderWizard() {
             {step === 'loading' && loadingSkeleton}
             {step === 'results' && resultsContent}
           </div>
+          {step === 'results' && pinColumn}
         </div>
       )}
     </div>
