@@ -23,11 +23,39 @@ interface GetGiftIdeasParams {
   priceMin: number;
   priceMax: number;
   level: Level;
+  // How adventurous the user wants results. Used to weight per-theme gift
+  // counts so the visible result count always matches what the user requested:
+  //   similar    → all count gifts in theme 1 (level 1)
+  //   mixed      → count gifts split across themes 1+2 (levels 1+2)
+  //   adventurous → count gifts split evenly across all 3 themes
+  relatedness?: 'similar' | 'mixed' | 'adventurous';
   vibes?: string[];
   // Currently-trending product names pulled from Brave web search.
   // Used as in-context inspiration — Claude only recommends them if they
   // actually fit the recipient.
   trendingProducts?: string[];
+}
+
+// Compute per-theme gift counts so the number of VISIBLE gifts (after
+// client-side relatedness filtering) exactly matches the user's requested count.
+//  similar    → show only theme 1 (level 1) → concentrate gifts there
+//  mixed      → show themes 1+2 (levels ≤ 2) → split across t1 and t2
+//  adventurous → show all themes → distribute evenly across all 3
+// Themes that are hidden by the filter still need ≥1 gift so the JSON
+// schema stays valid (3 themes, each non-empty).
+function themeDistribution(count: number, relatedness: string = 'adventurous'): [number, number, number] {
+  if (relatedness === 'similar') {
+    return [count, 1, 1];
+  }
+  if (relatedness === 'mixed') {
+    const t1 = Math.ceil(count / 2);
+    const t2 = Math.floor(count / 2);
+    return [t1, t2, 1];
+  }
+  // adventurous: spread evenly, extras front-loaded
+  const base = Math.floor(count / 3);
+  const r = count % 3;
+  return [base + (r > 0 ? 1 : 0), base + (r > 1 ? 1 : 0), base];
 }
 
 function levelInstruction(level: Level): string {
@@ -141,7 +169,10 @@ export async function getGiftIdeas(params: GetGiftIdeasParams): Promise<GiftThem
 
 Today's date is ${today}. If you recommend a specific product, prefer items that are likely still in production and on retail shelves as of this date. If you're unsure whether a product is still current, prefer a category-level recommendation over a specific SKU.${voiceOverlay ? '\n\n' + voiceOverlay : ''}`;
 
-  const userPrompt = `Generate ${params.count} gift ideas for:
+  const [t1Count, t2Count, t3Count] = themeDistribution(params.count, params.relatedness);
+  const totalCount = t1Count + t2Count + t3Count;
+
+  const userPrompt = `Generate ${totalCount} gift ideas for:
 
 Recipient: ${params.recipient} (${params.age} years old)
 Occasion: ${params.occasion}
@@ -155,7 +186,11 @@ Step 1 — Identify 3 thematic dimensions from this person's interests:
 - Theme 2: An adjacent activity or value this interest suggests (e.g. "micromobility" or "urban commuting")
 - Theme 3: A broader lifestyle dimension (e.g. "exploring" or "being outdoors")
 
-Step 2 — Generate gifts organized by these themes. Distribute the ${params.count} gifts as evenly as possible across all 3 themes. Each theme MUST contain at least 1 gift.
+Step 2 — Generate gifts organized by these themes. Use EXACTLY these gift counts per theme:
+- Theme 1: exactly ${t1Count} gift(s)
+- Theme 2: exactly ${t2Count} gift(s)
+- Theme 3: exactly ${t3Count} gift(s)
+Total: ${totalCount} gifts. Do not add or remove gifts from these counts.
 
 Return a JSON object with a "themes" key containing an array of EXACTLY 3 objects. Each theme object must have:
 - "id": a short slug (e.g. "direct", "micromobility", "exploring") — must be unique across themes

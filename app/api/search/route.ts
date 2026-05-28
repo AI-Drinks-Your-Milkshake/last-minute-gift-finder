@@ -8,9 +8,11 @@ import { AESTHETIC_VALUES } from '@/lib/aesthetics';
 const COUNT_MIN = 3;
 const COUNT_MAX = 15;
 const VALID_LEVELS = ['casual', 'interested', 'enthusiast'] as const;
+const VALID_RELATEDNESS = ['similar', 'mixed', 'adventurous'] as const;
 const MAX_VIBES = 2;
 
 type Level = (typeof VALID_LEVELS)[number];
+type Relatedness = (typeof VALID_RELATEDNESS)[number];
 
 function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
@@ -62,6 +64,20 @@ export async function POST(request: NextRequest) {
     return badRequest('Invalid level.');
   }
 
+  // Optional relatedness — shapes per-theme gift distribution so visible
+  // count matches what the user requested. Defaults to 'adventurous' so
+  // old clients (or direct API calls) continue to work unchanged.
+  let relatedness: Relatedness = 'adventurous';
+  if (body.relatedness !== undefined) {
+    if (
+      typeof body.relatedness !== 'string' ||
+      !VALID_RELATEDNESS.includes(body.relatedness as Relatedness)
+    ) {
+      return badRequest('Invalid relatedness value.');
+    }
+    relatedness = body.relatedness as Relatedness;
+  }
+
   // Optional vibes — must be an array of strings from AESTHETIC_VALUES,
   // with at most MAX_VIBES entries. Reject malformed values rather than
   // silently dropping them so the client surfaces the bug.
@@ -101,6 +117,7 @@ export async function POST(request: NextRequest) {
       priceMin,
       priceMax,
       level: level as Level,
+      relatedness,
       vibes,
       trendingProducts,
     });

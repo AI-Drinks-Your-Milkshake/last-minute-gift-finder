@@ -83,11 +83,12 @@ export default function GiftFinderWizard() {
   const [error,          setError]          = useState<string | null>(null);
   const [resultForm,     setResultForm]     = useState<SearchFormData>(DEFAULT_FORM);
   const [refreshing,     setRefreshing]     = useState(false);
-  const [committedLevel,    setCommittedLevel]    = useState<SearchFormData['level']>('interested');
-  const [committedCount,    setCommittedCount]    = useState<number>(9);
-  const [committedPriceMin, setCommittedPriceMin] = useState<number>(0);
-  const [committedPriceMax, setCommittedPriceMax] = useState<number>(1500);
-  const [committedVibes,    setCommittedVibes]    = useState<string[]>([]);
+  const [committedLevel,      setCommittedLevel]      = useState<SearchFormData['level']>('interested');
+  const [committedCount,      setCommittedCount]      = useState<number>(9);
+  const [committedPriceMin,   setCommittedPriceMin]   = useState<number>(0);
+  const [committedPriceMax,   setCommittedPriceMax]   = useState<number>(1500);
+  const [committedVibes,      setCommittedVibes]      = useState<string[]>([]);
+  const [committedRelatedness, setCommittedRelatedness] = useState<SearchFormData['relatedness']>('mixed');
 
   // ── Form helpers ──
 
@@ -118,11 +119,10 @@ export default function GiftFinderWizard() {
     setStep('loading');
     setError(null);
     try {
-      const { relatedness: _r, ...apiBody } = form;
       const res  = await fetch('/api/search', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(apiBody),
+        body:    JSON.stringify(form),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -137,6 +137,7 @@ export default function GiftFinderWizard() {
       setCommittedPriceMin(form.priceMin);
       setCommittedPriceMax(form.priceMax);
       setCommittedVibes(form.vibes ?? []);
+      setCommittedRelatedness(form.relatedness);
       setStep('results');
     } catch {
       setError('Network error. Please check your connection and try again.');
@@ -149,13 +150,14 @@ export default function GiftFinderWizard() {
   async function handleRefresh() {
     setRefreshing(true);
     try {
-      const { relatedness: _r, ...apiBody } = {
+      const apiBody = {
         ...form,
-        level:    resultForm.level,
-        count:    resultForm.count,
-        priceMin: resultForm.priceMin,
-        priceMax: resultForm.priceMax,
-        vibes:    resultForm.vibes ?? [],
+        level:       resultForm.level,
+        count:       resultForm.count,
+        priceMin:    resultForm.priceMin,
+        priceMax:    resultForm.priceMax,
+        vibes:       resultForm.vibes ?? [],
+        relatedness: resultForm.relatedness,
       };
       const res  = await fetch('/api/search', {
         method:  'POST',
@@ -170,6 +172,7 @@ export default function GiftFinderWizard() {
       setCommittedPriceMin(resultForm.priceMin);
       setCommittedPriceMax(resultForm.priceMax);
       setCommittedVibes(resultForm.vibes ?? []);
+      setCommittedRelatedness(resultForm.relatedness);
     } finally {
       setRefreshing(false);
     }
@@ -193,11 +196,12 @@ export default function GiftFinderWizard() {
   // recommendations, and there's no metadata on already-returned gifts to
   // filter them client-side by vibe.
   const needsRefresh =
-    resultForm.level    !== committedLevel    ||
-    resultForm.count     >  committedCount    ||
-    resultForm.priceMin  <  committedPriceMin ||
-    resultForm.priceMax  >  committedPriceMax ||
-    arraysDiffer(resultForm.vibes, committedVibes);
+    resultForm.level        !== committedLevel        ||
+    resultForm.count         >  committedCount        ||
+    resultForm.priceMin      <  committedPriceMin     ||
+    resultForm.priceMax      >  committedPriceMax     ||
+    arraysDiffer(resultForm.vibes, committedVibes)    ||
+    resultForm.relatedness  !== committedRelatedness;
 
   // ── Filtered results ──
 

@@ -87,6 +87,10 @@ export default function PinTemplate({ title, eyebrow, vibe, products }: Props) {
           textAlign: 'center',
           borderTop: '1px solid var(--pin-text-soft, #6a6a7a)',
           borderBottom: '1px solid var(--pin-text-soft, #6a6a7a)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
         }}
       >
         {eyebrow && (
@@ -157,6 +161,9 @@ function ProductGrid({
   if (products.length === 0) return <div />;
 
   const cols = gridCols(products.length);
+  // Explicit row count lets gridTemplateRows distribute height evenly so
+  // cells never overflow their allocated zone.
+  const rows = Math.ceil(products.length / cols);
 
   return (
     <section
@@ -167,8 +174,14 @@ function ProductGrid({
             : '28px 56px 70px', // leaves room for the Strix watermark
         display: 'grid',
         gridTemplateColumns: `repeat(${cols}, 1fr)`,
+        // Each row gets an equal share of the available zone height.
+        // Without this, `aspectRatio: 1/1` on cells can exceed row height
+        // and push content out of the pin frame.
+        gridTemplateRows: `repeat(${rows}, 1fr)`,
         gap: 24,
-        alignContent: 'center',
+        height: '100%',
+        overflow: 'hidden',
+        boxSizing: 'border-box',
       }}
     >
       {products.map((p, i) => (
@@ -182,25 +195,33 @@ function ProductCell({ product }: { product: PinProduct }) {
   const hasImage = Boolean(product.imageUrl);
 
   return (
+    // Grid item: stretch to fill its cell (default grid behavior).
+    // Flex column so image area expands and title stays pinned at bottom.
     <div
       style={{
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'flex-start',
-        gap: 10,
+        gap: 8,
+        // Clip anything that still overshoots — belt-and-suspenders.
+        overflow: 'hidden',
+        height: '100%',
         minHeight: 0,
       }}
     >
+      {/* Image area: flex:1 fills whatever height the grid row allocates.
+          No aspectRatio — that was forcing a square taller than the row,
+          causing overflow and cut-off. Images scale via objectFit:contain. */}
       <div
         style={{
           flex: 1,
           width: '100%',
           minHeight: 0,
-          aspectRatio: '1 / 1',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
+          overflow: 'hidden',
         }}
       >
         {hasImage ? (
@@ -210,8 +231,11 @@ function ProductCell({ product }: { product: PinProduct }) {
             alt={product.title}
             style={{
               maxWidth: '92%',
-              maxHeight: '92%',
+              maxHeight: '100%',
+              width: 'auto',
+              height: 'auto',
               objectFit: 'contain',
+              display: 'block',
               filter: 'drop-shadow(0 6px 14px rgba(0,0,0,0.08))',
             }}
           />
@@ -234,6 +258,7 @@ function ProductCell({ product }: { product: PinProduct }) {
           display: '-webkit-box',
           WebkitLineClamp: 2,
           WebkitBoxOrient: 'vertical',
+          flexShrink: 0,
         }}
       >
         {product.title}
