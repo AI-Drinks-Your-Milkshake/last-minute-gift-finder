@@ -3,7 +3,14 @@ import { getGiftIdeas } from '@/lib/anthropic';
 import { addRecentSearch } from '@/lib/kv';
 import { enrichThemesWithImages } from '@/lib/product-images';
 import { getTrendingProducts } from '@/lib/trends';
-import { AESTHETIC_VALUES } from '@/lib/aesthetics';
+import { AESTHETIC_VALUES, getAesthetic } from '@/lib/aesthetics';
+import {
+  pluralizeRecipient,
+  extractPrimaryInterest,
+  buildPinTitle,
+  buildSlug,
+} from '@/lib/pin-title';
+import { savePageResult } from '@/lib/page-results';
 
 const COUNT_MIN = 3;
 const COUNT_MAX = 25;
@@ -108,12 +115,18 @@ export async function POST(request: NextRequest) {
       vibes,
     });
 
+    // Request ~35% more gifts than the user asked for. After image validation
+    // filters out broken/inaccessible images the client will still have enough
+    // cards to fill the requested count. Cap at 40 to keep Claude response time
+    // reasonable. The client trims display to `count` via visibleThemes.
+    const bufferedCount = Math.min(40, Math.ceil(count * 1.35));
+
     const themes = await getGiftIdeas({
       recipient,
       age,
       occasion,
       interests,
-      count,
+      count: bufferedCount,
       priceMin,
       priceMax,
       level: level as Level,
@@ -128,6 +141,29 @@ export async function POST(request: NextRequest) {
     // to the emoji-only card.
     await enrichThemesWithImages(themes);
 
+    // ── Build the public page slug ──────────────────────────────────────────
+    // Slug is derived from the pin title formula so the URL matches the pin.
+    // Pattern: "{vibe}-{occasion}-gifts-for-{recipient-plural}"
+    const recipientPlural  = pluralizeRecipient(recipient);
+    const vibeLabel        = vibes?.[0] ? getAesthetic(vibes[0])?.label : undefined;
+    const primaryInterest  = extractPrimaryInterest(interests);
+    const pageTitle        = buildPinTitle({ vibeLabel, occasion, recipientPlural, primaryInterest: primaryInterest ?? undefined });
+    const pageSlug         = buildSlug(pageTitle);
+
+    // Persist full results so the public page can read them without re-running
+    // the search. Fire-and-forget — KV failure is non-fatal.
+    savePageResult(pageSlug, {
+      title: pageTitle,
+      recipient,
+      recipientPlural,
+      occasion,
+      age,
+      vibeLabel,
+      primaryInterest: primaryInterest ?? undefined,
+      themes,
+      createdAt: Date.now(),
+    }).catch((err) => console.error('[route] page-results write failed:', err));
+
     // Await the KV write — fire-and-forget is unreliable in serverless
     // (the function terminates before the async write completes)
     await addRecentSearch({
@@ -136,7 +172,7 @@ export async function POST(request: NextRequest) {
       timestamp: Date.now(),
     }).catch((err) => console.error('Failed to save recent search:', err));
 
-    return NextResponse.json({ themes });
+    return NextResponse.json({ themes, pageSlug });
   } catch (err) {
     console.error('Gift search error:', err);
     return NextResponse.json(

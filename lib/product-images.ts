@@ -143,6 +143,35 @@ async function extractOgImage(pageUrl: string): Promise<string | null> {
   }
 }
 
+/**
+ * Verify that a candidate image URL actually loads in a browser context:
+ * - HTTP 200 (no 403 hotlink block or 404)
+ * - Content-Type starts with "image/" (rules out HTML login walls and logos
+ *   served as text/html, as well as tiny GIF tracking pixels)
+ *
+ * Uses a short timeout so a single bad URL doesn't stall the whole request.
+ */
+async function isImageAccessible(url: string): Promise<boolean> {
+  try {
+    const res = await fetchWithTimeout(
+      url,
+      {
+        method: 'HEAD',
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (compatible; LastMinuteGiftFinder/1.0; +https://github.com)',
+        },
+      },
+      2500,
+    );
+    if (!res.ok) return false;
+    const ct = res.headers.get('content-type') ?? '';
+    return ct.startsWith('image/');
+  } catch {
+    return false;
+  }
+}
+
 async function lookupImage(searchTerms: string): Promise<string | null> {
   let results: BraveImageResult[];
   try {
@@ -154,16 +183,24 @@ async function lookupImage(searchTerms: string): Promise<string | null> {
   if (results.length === 0) return null;
 
   const ranked = [...results].sort((a, b) => scoreResult(b) - scoreResult(a));
-  const top = ranked[0];
 
-  // og:image second hop — much higher quality than the search thumbnail
-  if (top.url) {
-    const og = await extractOgImage(top.url);
-    if (og) return og;
+  // Try each ranked result in order until we find one with an accessible image.
+  // The og:image second hop gives higher quality; fall back to the raw Brave
+  // thumbnail only if og:image is absent. Skip any candidate whose final URL
+  // fails the HEAD accessibility check (hotlink-blocked, 404, or not an image).
+  for (const candidate of ranked) {
+    // og:image second hop
+    if (candidate.url) {
+      const og = await extractOgImage(candidate.url);
+      if (og && await isImageAccessible(og)) return og;
+    }
+
+    // Raw Brave URL fallback
+    const rawUrl = candidate.properties?.url ?? candidate.thumbnail?.src ?? null;
+    if (rawUrl && await isImageAccessible(rawUrl)) return rawUrl;
   }
 
-  // Fall back to whatever Brave returned directly
-  return top.properties?.url ?? top.thumbnail?.src ?? null;
+  return null;
 }
 
 /**

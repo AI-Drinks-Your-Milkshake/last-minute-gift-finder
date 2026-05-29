@@ -7,7 +7,11 @@ interface Props {
 }
 
 export default function GiftThemeSection({ theme, cols = 2 }: Props) {
-  if (theme.gifts.length === 0) return null;
+  // Filter out gifts where the server confirmed there's no valid image URL.
+  // This keeps the grid clean — every visible card will have a product photo.
+  // (Browser-side broken images are handled separately in GiftCard.)
+  const visibleGifts = theme.gifts.filter((g) => g.imageUrl != null);
+  if (visibleGifts.length === 0) return null;
 
   const isDirect = theme.relatednessLevel === 1;
 
@@ -43,7 +47,7 @@ export default function GiftThemeSection({ theme, cols = 2 }: Props) {
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: 16 }}>
-        {theme.gifts.map((gift, i) => (
+        {visibleGifts.map((gift, i) => (
           <GiftCard key={`${theme.id}-${i}`} gift={gift} />
         ))}
       </div>

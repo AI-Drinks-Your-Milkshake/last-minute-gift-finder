@@ -89,6 +89,7 @@ export default function GiftFinderWizard() {
   const [committedPriceMax,   setCommittedPriceMax]   = useState<number>(1500);
   const [committedVibes,      setCommittedVibes]      = useState<string[]>([]);
   const [committedRelatedness, setCommittedRelatedness] = useState<SearchFormData['relatedness']>('mixed');
+  const [pageSlug,            setPageSlug]            = useState<string | null>(null);
 
   // ── Display preferences (no re-fetch needed) ──
   const [gridCols, setGridCols] = useState(4);
@@ -157,6 +158,7 @@ export default function GiftFinderWizard() {
         return;
       }
       setThemes(data.themes);
+      setPageSlug(data.pageSlug ?? null);
       setResultForm({ ...form });
       setCommittedLevel(form.level);
       setCommittedCount(form.count);
@@ -193,6 +195,7 @@ export default function GiftFinderWizard() {
       const data = await res.json();
       if (!res.ok) return;
       setThemes(data.themes);
+      if (data.pageSlug) setPageSlug(data.pageSlug);
       setCommittedLevel(resultForm.level);
       setCommittedCount(resultForm.count);
       setCommittedPriceMin(resultForm.priceMin);
@@ -693,18 +696,45 @@ export default function GiftFinderWizard() {
         />
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '28px 20px' }}>
+
+        {/* ── PIN PREVIEW ────────────────────────────────────────────── */}
         <p style={{
           fontSize: 10, color: C.textMuted, letterSpacing: '0.08em',
-          textTransform: 'uppercase', marginBottom: 16, fontWeight: 600,
+          textTransform: 'uppercase', marginBottom: 8, fontWeight: 600,
         }}>
           Pin preview
         </p>
+
+        {/* Title formula breakdown — shows which wizard inputs compose the title */}
+        {visibleThemes.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            {[
+              committedVibes[0]
+                ? { label: 'Vibe', value: committedVibes[0].charAt(0).toUpperCase() + committedVibes[0].slice(1).replace(/-/g, ' ') }
+                : null,
+              { label: 'Occasion', value: form.occasion },
+              { label: 'Recipient', value: form.recipient },
+              form.interests?.trim()
+                ? { label: 'Interest', value: form.interests.split(/[,;]/)[0].trim() }
+                : null,
+            ].filter(Boolean).map((item) => (
+              <div key={item!.label} style={{ display: 'flex', gap: 6, marginBottom: 3, alignItems: 'baseline' }}>
+                <span style={{ fontSize: 9, color: C.textMuted, letterSpacing: '0.06em', textTransform: 'uppercase', width: 52, flexShrink: 0 }}>
+                  {item!.label}
+                </span>
+                <span style={{ fontSize: 11, color: C.textSec }}>{item!.value}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {!refreshing && visibleThemes.length > 0 ? (
           <PinPreview
             recipient={form.recipient}
             occasion={form.occasion}
             vibes={committedVibes}
             themes={visibleThemes}
+            interests={form.interests}
             targetWidth={pinWidth - 40}
             minimal
           />
@@ -715,6 +745,54 @@ export default function GiftFinderWizard() {
               : 'Run a search to see the Pinterest pin preview.'}
           </p>
         )}
+
+        {/* ── PAGE PREVIEW ───────────────────────────────────────────── */}
+        {visibleThemes.length > 0 && (
+          <div style={{ marginTop: 24, paddingTop: 20, borderTop: `1px solid #16161e` }}>
+            <p style={{
+              fontSize: 10, color: C.textMuted, letterSpacing: '0.08em',
+              textTransform: 'uppercase', marginBottom: 8, fontWeight: 600,
+            }}>
+              Page preview
+            </p>
+            <p style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.5, marginBottom: 12 }}>
+              The public page a Pinterest pin would link to.
+            </p>
+            {pageSlug ? (
+              <a
+                href={`/g/${pageSlug}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  width: '100%', background: C.surface, color: C.textSec,
+                  border: `1px solid ${C.border}`, borderRadius: 10,
+                  padding: '10px 14px', fontSize: 12, fontWeight: 500,
+                  textDecoration: 'none', fontFamily: 'inherit',
+                  transition: 'border-color 0.15s, color 0.15s',
+                }}
+                onMouseEnter={e => {
+                  (e.currentTarget as HTMLAnchorElement).style.borderColor = C.accent;
+                  (e.currentTarget as HTMLAnchorElement).style.color = C.textPri;
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLAnchorElement).style.borderColor = C.border;
+                  (e.currentTarget as HTMLAnchorElement).style.color = C.textSec;
+                }}
+              >
+                Open page preview
+                <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2 10L10 2M10 2H4.5M10 2V7.5" />
+                </svg>
+              </a>
+            ) : (
+              <p style={{ fontSize: 11, color: C.textMuted }}>
+                {refreshing ? 'Refreshing…' : 'Saving page…'}
+              </p>
+            )}
+          </div>
+        )}
+
       </div>
       </div>{/* end relative wrapper */}
     </aside>

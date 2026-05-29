@@ -15,6 +15,11 @@
 import { useState } from 'react';
 import type { GiftTheme, PinProduct } from '@/types';
 import { getAesthetic } from '@/lib/aesthetics';
+import {
+  pluralizeRecipient,
+  extractPrimaryInterest,
+  buildPinTitle,
+} from '@/lib/pin-title';
 import PinTemplate from './PinTemplate';
 
 interface Props {
@@ -22,6 +27,10 @@ interface Props {
   occasion: string;      // wizard `occasion` (e.g. "Birthday")
   vibes: string[];       // wizard `vibes` — 0, 1, or 2 entries
   themes: GiftTheme[];   // current visible themes from the wizard
+  /** Raw interests freeform text from wizard step 4. Used to derive the
+   *  "who love X" suffix appended to the pin title when a clean primary
+   *  interest can be extracted (≤ 3 words after stripping filler phrases). */
+  interests?: string;
   // How wide to render the preview (px). Pin is natively 1000×1500;
   // we scale it to this width. 400px ≈ 0.4 scale, fits comfortably
   // alongside results.
@@ -35,32 +44,6 @@ interface Props {
 const NATIVE_WIDTH = 1000;
 const NATIVE_HEIGHT = 1500;
 const MAX_PRODUCTS = 20;  // cap for the pin grid
-
-// Special-case plurals for recipients that don't take a naive "+s".
-// Keep this short — list grows organically as edge cases turn up.
-const PLURAL_OVERRIDES: Record<string, string> = {
-  Wife: 'Wives',
-  Boss: 'Bosses',
-  'Mother-in-law': 'Mothers-in-law',
-  'Father-in-law': 'Fathers-in-law',
-  'Sister-in-law': 'Sisters-in-law',
-  'Brother-in-law': 'Brothers-in-law',
-  'Fiancé(e)': 'Fiancés',
-  Child: 'Children',
-  Stepchild: 'Stepchildren',
-};
-
-// Strip parentheticals ("Kid (5–8)" → "Kid") then pluralize. Used for
-// the pin title; the eyebrow uses the raw recipient string.
-function pluralize(recipient: string): string {
-  const base = recipient.replace(/\s*\([^)]*\)\s*/g, '').trim();
-  if (PLURAL_OVERRIDES[base]) return PLURAL_OVERRIDES[base];
-  if (base.endsWith('s')) return base;
-  if (base.endsWith('y') && !'aeiou'.includes(base[base.length - 2])) {
-    return base.slice(0, -1) + 'ies';
-  }
-  return base + 's';
-}
 
 // Flatten the wizard's themed structure into a single PinProduct list.
 // Themes preserve order (direct → adjacent → exploratory), so the most
@@ -85,6 +68,7 @@ export default function PinPreview({
   occasion,
   vibes,
   themes,
+  interests = '',
   targetWidth = 400,
   minimal = false,
 }: Props) {
@@ -96,15 +80,15 @@ export default function PinPreview({
   const vibeSlug = vibes[0];
   const vibe = vibeSlug ? getAesthetic(vibeSlug) : undefined;
 
-  const vibeLabel = vibe?.label;
-  const recipientPlural = pluralize(recipient);
+  const vibeLabel        = vibe?.label;
+  const recipientPlural  = pluralizeRecipient(recipient);
+  const primaryInterest  = extractPrimaryInterest(interests);
 
-  // Title formula. Vibe present: "Coquette Birthday Gifts for Teen Girls".
-  // Vibe absent: "Birthday Gifts for Teen Girls" (broad).
-  const title = vibeLabel
-    ? `${vibeLabel} ${occasion} Gifts for ${recipientPlural}`
-    : `${occasion} Gifts for ${recipientPlural}`;
-
+  // Title formula (via shared lib/pin-title.ts):
+  //   With vibe + interest: "Outdoorsy Graduation Gifts for Teen Boys who love Camping"
+  //   With vibe only:       "Coquette Birthday Gifts for Teen Girls"
+  //   No vibe:              "Birthday Gifts for Teen Girls"
+  const title   = buildPinTitle({ vibeLabel, occasion, recipientPlural, primaryInterest: primaryInterest ?? undefined });
   const eyebrow = `${occasion} · ${recipient}`;
 
   const products = themesToProducts(themes);

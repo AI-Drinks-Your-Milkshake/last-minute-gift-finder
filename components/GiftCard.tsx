@@ -41,6 +41,12 @@ export default function GiftCard({ gift }: Props) {
   const [imageBroken, setImageBroken] = useState(false);
   const showImage = Boolean(gift.imageUrl) && !imageBroken;
 
+  // If the image URL fails to load in the browser (hotlink block, CDN gone,
+  // etc.), hide this card entirely rather than showing an emoji fallback.
+  // GiftThemeSection already filtered out null imageUrls server-side, so any
+  // remaining failure is a live load error — hiding keeps the grid clean.
+  if (imageBroken) return null;
+
   return (
     <div
       className="group flex flex-col overflow-hidden rounded-2xl transition-all duration-200 hover:-translate-y-1"
