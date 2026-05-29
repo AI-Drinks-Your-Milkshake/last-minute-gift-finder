@@ -172,11 +172,15 @@ Today's date is ${today}. If you recommend a specific product, prefer items that
   const [t1Count, t2Count, t3Count] = themeDistribution(params.count, params.relatedness);
   const totalCount = t1Count + t2Count + t3Count;
 
+  const aboutLine = params.interests?.trim()
+    ? `About them: ${params.interests}`
+    : `About them: No specific interests provided — infer broadly popular gift ideas for a ${params.recipient} aged ${params.age}.`;
+
   const userPrompt = `Generate ${totalCount} gift ideas for:
 
 Recipient: ${params.recipient} (${params.age} years old)
 Occasion: ${params.occasion}
-About them: ${params.interests}
+${aboutLine}
 
 ${levelInstruction(params.level)}
 ${priceInstruction(params.priceMin, params.priceMax)}

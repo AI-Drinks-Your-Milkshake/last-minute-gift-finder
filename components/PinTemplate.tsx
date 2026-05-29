@@ -168,9 +168,11 @@ function ProductGrid({
   if (products.length === 0) return <div />;
 
   const cols = gridCols(products.length);
-  // Explicit row count lets gridTemplateRows distribute height evenly so
-  // cells never overflow their allocated zone.
-  const rows = Math.ceil(products.length / cols);
+  // Masonry column layout: items stack top-to-bottom within each column,
+  // each at a varying height so the result looks organic rather than grid-locked.
+  // Prime-length pattern (11) avoids aligning with common col counts (3, 4, 5)
+  // so adjacent items within a column are always visually distinct heights.
+  const ITEM_HEIGHTS = [148, 118, 182, 132, 162, 112, 158, 142, 172, 124, 155];
 
   return (
     <section
@@ -179,20 +181,24 @@ function ProductGrid({
           placement === 'top'
             ? '44px 56px 28px'
             : '28px 56px 70px', // leaves room for the Strix watermark
-        display: 'grid',
-        gridTemplateColumns: `repeat(${cols}, 1fr)`,
-        // Each row gets an equal share of the available zone height.
-        // Without this, `aspectRatio: 1/1` on cells can exceed row height
-        // and push content out of the pin frame.
-        gridTemplateRows: `repeat(${rows}, 1fr)`,
-        gap: 24,
+        columnCount: cols,
+        columnGap: 4,
         height: '100%',
         overflow: 'hidden',
         boxSizing: 'border-box',
       }}
     >
       {products.map((p, i) => (
-        <ProductCell key={i} product={p} />
+        <div
+          key={i}
+          style={{
+            breakInside: 'avoid',
+            marginBottom: 4,
+            height: ITEM_HEIGHTS[i % ITEM_HEIGHTS.length],
+          }}
+        >
+          <ProductCell product={p} />
+        </div>
       ))}
     </section>
   );

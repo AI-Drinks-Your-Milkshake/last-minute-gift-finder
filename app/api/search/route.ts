@@ -42,8 +42,8 @@ export async function POST(request: NextRequest) {
   const occasion = typeof body.occasion === 'string' ? body.occasion.trim() : '';
   const interests = typeof body.interests === 'string' ? body.interests.trim() : '';
 
-  if (!recipient || !age || !occasion || !interests) {
-    return badRequest('All fields are required.');
+  if (!recipient || !age || !occasion) {
+    return badRequest('Recipient, age, and occasion are required.');
   }
 
   const count = body.count;

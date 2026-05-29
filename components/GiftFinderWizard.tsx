@@ -934,7 +934,7 @@ export default function GiftFinderWizard() {
         Tell us about them.
       </h2>
       <p style={{ fontSize: 15, color: C.textSec, marginBottom: 24, lineHeight: 1.5 }}>
-        Interests, hobbies, quirks — anything that helps paint a picture.
+        Interests, hobbies, quirks — anything that helps paint a picture. Optional — skip if you want general ideas.
       </p>
       <textarea
         placeholder="e.g. obsessed with cooking and craft beer, loves camping, recently got into woodworking…"
@@ -959,8 +959,8 @@ export default function GiftFinderWizard() {
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
         <button onClick={() => setStep(3)} style={backBtn}>← Back</button>
-        <button onClick={() => { if (form.interests.trim()) setStep(5); }} disabled={!form.interests.trim()} style={continueBtn(!!form.interests.trim())}>
-          Continue
+        <button onClick={() => setStep(5)} style={continueBtn(true)}>
+          {form.interests.trim() ? 'Continue' : 'Skip'}
         </button>
       </div>
     </StepWrap>
