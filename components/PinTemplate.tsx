@@ -89,9 +89,11 @@ export default function PinTemplate({ title, eyebrow, vibe, products }: Props) {
         style={{
           padding: '24px 56px',
           textAlign: 'center',
-          // rgba so the divider reads on both light and dark --pin-bg values
-          borderTop: '1px solid var(--pin-text-soft, rgba(255,255,255,0.18))',
-          borderBottom: '1px solid var(--pin-text-soft, rgba(255,255,255,0.18))',
+          // Colored band separates the product zones visually.
+          // --pin-band-bg lets individual vibes override the band color;
+          // falls back to --pin-accent, then a semi-transparent dark overlay
+          // that reads on both light and dark --pin-bg values.
+          backgroundColor: 'var(--pin-band-bg, var(--pin-accent, rgba(0,0,0,0.35)))',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
@@ -200,14 +202,11 @@ function ProductCell({ product }: { product: PinProduct }) {
   const hasImage = Boolean(product.imageUrl);
 
   return (
-    // White card tile — floats on the vibe's --pin-bg regardless of whether
-    // that background is light (pastels) or dark (gamer, dark academia).
-    // Text inside is always dark so it's readable on the white card surface.
+    // No card background — products float directly on the pin's --pin-bg.
+    // Images cut out against the background; text uses --pin-text so it
+    // remains readable on both light and dark vibe backgrounds.
     <div
       style={{
-        background: '#ffffff',
-        borderRadius: 12,
-        overflow: 'hidden',
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
@@ -248,14 +247,14 @@ function ProductCell({ product }: { product: PinProduct }) {
         )}
       </div>
 
-      {/* Fixed dark text — always readable on white regardless of vibe. */}
+      {/* Text uses --pin-text so it reads on whatever vibe background is behind it. */}
       <p
         style={{
           margin: '8px 0 0',
           fontSize: 13,
           lineHeight: 1.25,
           textAlign: 'center',
-          color: '#2a2a3a',
+          color: 'var(--pin-text, #f0f0f8)',
           fontWeight: 500,
           maxWidth: '95%',
           overflow: 'hidden',

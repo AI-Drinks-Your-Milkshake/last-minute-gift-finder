@@ -48,6 +48,7 @@ export interface VibeCssOverrides {
   '--pin-text'?: string;
   '--pin-text-soft'?: string;
   '--pin-accent'?: string;     // optional override; falls back to --accent
+  '--pin-band-bg'?: string;    // title-band background; falls back to --pin-accent then rgba(0,0,0,0.35)
 }
 
 export interface Aesthetic {
