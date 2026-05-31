@@ -281,3 +281,165 @@ Respond with ONLY the JSON object. Start your response with { and end with }. No
 
   return themes;
 }
+
+// ── Streaming variant ────────────────────────────────────────────────────────
+//
+// Instructs Claude to output one theme per line (NDJSON) so we can yield each
+// theme to the client the moment Claude finishes generating it, rather than
+// waiting for all three. First cards typically appear within 5–10 s.
+//
+// Falls back to the standard `{themes:[...]}` JSON format if Claude ignores
+// the NDJSON instruction — this ensures we always return something.
+
+export async function* streamGiftThemes(
+  params: GetGiftIdeasParams,
+): AsyncGenerator<GiftTheme> {
+  const today = new Date().toISOString().slice(0, 10);
+  const voiceOverlay = voiceOverlayFor(params.recipient);
+  const aestheticFragment = aestheticPromptFragment(params.vibes ?? []);
+  const trendingFragment =
+    params.trendingProducts && params.trendingProducts.length > 0
+      ? `\nCurrently-trending product names that surfaced in recent gift round-ups (use only as inspiration; recommend a specific one only if it actually fits this recipient):\n${params.trendingProducts.map((p) => `- ${p}`).join('\n')}\n`
+      : '';
+
+  // System prompt — same concierge persona, but NDJSON output format.
+  const systemPrompt = `You are a premium gift concierge who specializes in finding specific, exciting, high-quality gifts. You think like a personal shopper who knows exactly what someone will love. Output ONLY valid NDJSON — exactly 3 lines, each a single complete JSON object for one theme, with no outer wrapper, no markdown, no code fences.
+
+Today's date is ${today}. If you recommend a specific product, prefer items that are likely still in production and on retail shelves as of this date.${voiceOverlay ? '\n\n' + voiceOverlay : ''}`;
+
+  const [t1Count, t2Count, t3Count] = themeDistribution(params.count, params.relatedness);
+  const totalCount = t1Count + t2Count + t3Count;
+
+  const aboutLine = params.interests?.trim()
+    ? `About them: ${params.interests}`
+    : `About them: No specific interests provided — infer broadly popular gift ideas for a ${params.recipient} aged ${params.age}.`;
+
+  const userPrompt = `Generate ${totalCount} gift ideas for:
+
+Recipient: ${params.recipient} (${params.age} years old)
+Occasion: ${params.occasion}
+${aboutLine}
+
+${levelInstruction(params.level)}
+${priceInstruction(params.priceMin, params.priceMax)}
+${aestheticFragment ? '\n' + aestheticFragment + '\n' : ''}${trendingFragment}
+Step 1 — Identify 3 thematic dimensions from this person's interests:
+- Theme 1: The direct interest itself (e.g. "e-scooters")
+- Theme 2: An adjacent activity or value this interest suggests (e.g. "micromobility" or "urban commuting")
+- Theme 3: A broader lifestyle dimension (e.g. "exploring" or "being outdoors")
+
+Step 2 — Generate gifts organized by these themes. Use EXACTLY these gift counts per theme:
+- Theme 1: exactly ${t1Count} gift(s)
+- Theme 2: exactly ${t2Count} gift(s)
+- Theme 3: exactly ${t3Count} gift(s)
+Total: ${totalCount} gifts. Do not add or remove gifts from these counts.
+
+Output EXACTLY 3 lines — one complete JSON object per line, no outer array or wrapper key. Each theme JSON object must have:
+- "id": a short slug (e.g. "direct", "micromobility", "exploring") — must be unique across themes
+- "label": display text — for theme 1 use "For [interest] fans" style, for themes 2-3 use "Since they like [theme dimension]" style
+- "relatednessLevel": 1 for theme 1, 2 for theme 2, 3 for theme 3
+- "gifts": array of gift objects, each with:
+  - "title": specific product name (e.g. "Oura Ring Gen 3" not "fitness tracker", "Vitamix A3500" not "blender")
+  - "description": 1–2 sentences explaining why it fits this specific recipient. Start with what they'd actually do with it, in a single concrete sentence. Avoid the words "perfect", "thoughtful", or "loves".
+  - "priceRange": formatted as "$X–$Y"
+  - "priceMin": lower bound as a NUMBER (no $ sign, no quotes, no commas)
+  - "priceMax": upper bound as a NUMBER (no $ sign, no quotes, no commas)
+  - "searchTerms": 3–6 words optimized for Amazon product search
+  - "emoji": single emoji for the gift category — choose the most fitting: 🎮 gaming, 📚 books, 🏃 fitness, 🎨 art/creative, 🍳 cooking, 🎵 music, 🌿 wellness, 🧳 travel, 💎 jewelry/luxury, 🔧 tech/tools, 🎭 entertainment, 👗 fashion, 🏠 home, 🍷 food/drink, 🧘 mindfulness, 🐾 pets, 🌱 outdoors, 🎲 games/fun
+  - "category": MUST be exactly one of these strings: ${GIFT_CATEGORIES.map((c) => `"${c}"`).join(', ')}
+
+Think like a thoughtful friend who knows this ${params.recipient} well. Pick gifts that feel curated and genuinely exciting, not safe or obvious. Avoid gift cards, generic flowers, or candles unless interests explicitly demand them.
+
+Output only the 3 JSON lines. No other text, no markdown, no outer wrapper.`;
+
+  const stream = await anthropic.messages.create({
+    model: MODEL,
+    max_tokens: 8000,
+    temperature: 0.85,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userPrompt }],
+    stream: true,
+  });
+
+  // Buffer text from the stream. Yield a theme whenever a complete JSON line
+  // lands (i.e. we see a '\n' after content that parses as a valid GiftTheme).
+  let lineBuffer = '';
+  let fullText   = '';
+  const yieldedIds = new Set<string>();
+
+  function tryExtractTheme(text: string): GiftTheme | null {
+    const trimmed = text.trim();
+    if (!trimmed) return null;
+    const start = trimmed.indexOf('{');
+    const end   = trimmed.lastIndexOf('}');
+    if (start === -1 || end === -1 || end <= start) return null;
+    try {
+      const parsed = JSON.parse(trimmed.slice(start, end + 1));
+      if (!isValidTheme(parsed)) return null;
+      if (yieldedIds.has((parsed as GiftTheme).id)) return null;
+      yieldedIds.add((parsed as GiftTheme).id);
+      const theme = parsed as GiftTheme;
+      for (const g of theme.gifts) g.category = coerceCategory(g.category);
+      return theme;
+    } catch {
+      return null;
+    }
+  }
+
+  for await (const chunk of stream) {
+    if (chunk.type !== 'content_block_delta') continue;
+    if (chunk.delta.type !== 'text_delta') continue;
+
+    const text = chunk.delta.text;
+    fullText   += text;
+    lineBuffer += text;
+
+    // Yield any complete lines (everything up to the last '\n').
+    const lastNl = lineBuffer.lastIndexOf('\n');
+    if (lastNl < 0) continue;
+
+    const completeLines = lineBuffer.slice(0, lastNl).split('\n');
+    lineBuffer = lineBuffer.slice(lastNl + 1);
+
+    for (const line of completeLines) {
+      const theme = tryExtractTheme(line);
+      if (theme) yield theme;
+    }
+  }
+
+  // Process the final partial line (no trailing '\n').
+  if (lineBuffer.trim()) {
+    const theme = tryExtractTheme(lineBuffer);
+    if (theme) yield theme;
+  }
+
+  // ── Fallback: Claude output the old {themes:[...]} format instead of NDJSON ──
+  // If we got fewer than 3 themes from line-by-line parsing, attempt to parse
+  // the full accumulated text as the standard JSON object format.
+  if (yieldedIds.size < 3) {
+    let raw = fullText.trim();
+    if (raw.startsWith('```')) {
+      raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    }
+    const firstBrace = raw.indexOf('{');
+    const lastBrace  = raw.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      try {
+        const parsed = JSON.parse(raw.slice(firstBrace, lastBrace + 1));
+        const themesRaw = (parsed as { themes?: unknown }).themes;
+        if (Array.isArray(themesRaw)) {
+          for (const t of themesRaw) {
+            if (isValidTheme(t) && !yieldedIds.has((t as GiftTheme).id)) {
+              yieldedIds.add((t as GiftTheme).id);
+              const theme = t as GiftTheme;
+              for (const g of theme.gifts) g.category = coerceCategory(g.category);
+              yield theme;
+            }
+          }
+        }
+      } catch {
+        // Nothing we can do — the route will emit an error event.
+      }
+    }
+  }
+}

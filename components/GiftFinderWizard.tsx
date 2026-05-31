@@ -24,7 +24,7 @@ const PRICE_MIN  = 0;
 const PRICE_MAX  = 1500;
 const PRICE_STEP = 25;
 const COUNT_MIN  = 3;
-const COUNT_MAX  = 25;
+const COUNT_MAX  = 30;
 const COUNT_STEP = 1;
 // Vibe is step 5 (optional). Adventurousness shifted to step 6.
 const STEP_NAMES = ['Who', 'Age', 'Occasion', 'About them', 'Vibe', 'Adventurousness'];
@@ -141,9 +141,8 @@ export default function GiftFinderWizard() {
   }
 
   // ── Lazy image loader ──
-  // Called after themes are set. Fires /api/images in the background and
-  // patches imageUrls into the themes state when the response arrives.
-  // Cards render immediately with a shimmer skeleton; images pop in ~2-5s later.
+  // Fires /api/images after cards are already visible. Images pop in
+  // progressively (shimmer → photo) without blocking initial render.
 
   async function loadImages(initialThemes: GiftTheme[]) {
     const gifts = initialThemes.flatMap((t) =>
@@ -175,43 +174,103 @@ export default function GiftFinderWizard() {
         })),
       );
     } catch {
-      // Image loading failed silently — cards keep showing emoji fallback.
+      // Silently swallow — cards already show emoji fallback.
+    }
+  }
+
+  // ── SSE stream consumer ──
+  // Reads the text/event-stream from /api/search and calls onTheme for each
+  // arriving theme, onDone when the stream closes, and onError on failure.
+
+  async function consumeSearchStream(
+    body:    object,
+    onTheme: (theme: GiftTheme) => void,
+    onDone:  (slug: string | null) => void,
+    onError: (msg: string) => void,
+  ): Promise<void> {
+    const res = await fetch('/api/search', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(body),
+    });
+
+    if (!res.body) { onError('No response body.'); return; }
+
+    const reader  = res.body.getReader();
+    const decoder = new TextDecoder();
+    let   buf     = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buf += decoder.decode(value, { stream: true });
+
+      // SSE events are separated by '\n\n'.
+      const parts = buf.split('\n\n');
+      buf = parts.pop() ?? '';
+
+      for (const part of parts) {
+        const dataLine = part.split('\n').find((l) => l.startsWith('data: '));
+        if (!dataLine) continue;
+        try {
+          const ev = JSON.parse(dataLine.slice(6)) as {
+            type: string; theme?: GiftTheme; pageSlug?: string; message?: string;
+          };
+          if (ev.type === 'theme' && ev.theme)    onTheme(ev.theme);
+          if (ev.type === 'done')                  onDone(ev.pageSlug ?? null);
+          if (ev.type === 'error' && ev.message)   onError(ev.message);
+        } catch { /* malformed event — skip */ }
+      }
     }
   }
 
   // ── Initial search ──
+  // Shows results after the FIRST theme arrives (typically 5–10 s), then
+  // adds themes progressively as Claude generates them.
 
   async function handleSubmit() {
     setStep('loading');
+    setThemes([]);
     setError(null);
+
+    let firstTheme = true;
+    const allThemes: GiftTheme[] = [];
+
     try {
-      const res  = await fetch('/api/search', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(form),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error ?? 'Something went wrong. Please try again.');
+      await consumeSearchStream(
+        form,
+        (theme) => {
+          allThemes.push(theme);
+          setThemes([...allThemes]);
+          if (firstTheme) {
+            firstTheme = false;
+            setResultForm({ ...form });
+            setCommittedLevel(form.level);
+            setCommittedCount(form.count);
+            setCommittedPriceMin(form.priceMin);
+            setCommittedPriceMax(form.priceMax);
+            setCommittedVibes(form.vibes ?? []);
+            setCommittedRelatedness(form.relatedness);
+            setStep('results');           // ← cards visible after first theme
+          }
+        },
+        (slug) => setPageSlug(slug),
+        (msg)  => {
+          setError(msg);
+          if (firstTheme) setStep(6);    // only go back if nothing was shown
+        },
+      );
+
+      if (allThemes.length > 0) {
+        loadImages(allThemes);
+      } else if (firstTheme) {
+        setError('Something went wrong. Please try again.');
         setStep(6);
-        return;
       }
-      // Render cards immediately — imageUrl is undefined on all gifts at this point.
-      setThemes(data.themes);
-      setPageSlug(data.pageSlug ?? null);
-      setResultForm({ ...form });
-      setCommittedLevel(form.level);
-      setCommittedCount(form.count);
-      setCommittedPriceMin(form.priceMin);
-      setCommittedPriceMax(form.priceMax);
-      setCommittedVibes(form.vibes ?? []);
-      setCommittedRelatedness(form.relatedness);
-      setStep('results');
-      // Fire image loading in the background — doesn't block card rendering.
-      loadImages(data.themes);
     } catch {
       setError('Network error. Please check your connection and try again.');
-      setStep(6);
+      if (firstTheme) setStep(6);
     }
   }
 
@@ -219,6 +278,8 @@ export default function GiftFinderWizard() {
 
   async function handleRefresh() {
     setRefreshing(true);
+    const allThemes: GiftTheme[] = [];
+
     try {
       const apiBody = {
         ...form,
@@ -229,23 +290,24 @@ export default function GiftFinderWizard() {
         vibes:       resultForm.vibes ?? [],
         relatedness: resultForm.relatedness,
       };
-      const res  = await fetch('/api/search', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(apiBody),
-      });
-      const data = await res.json();
-      if (!res.ok) return;
-      setThemes(data.themes);
-      if (data.pageSlug) setPageSlug(data.pageSlug);
-      setCommittedLevel(resultForm.level);
-      setCommittedCount(resultForm.count);
-      setCommittedPriceMin(resultForm.priceMin);
-      setCommittedPriceMax(resultForm.priceMax);
-      setCommittedVibes(resultForm.vibes ?? []);
-      setCommittedRelatedness(resultForm.relatedness);
-      // Lazy-load images for the refreshed results too.
-      loadImages(data.themes);
+
+      await consumeSearchStream(
+        apiBody,
+        (theme) => { allThemes.push(theme); },
+        (slug)  => { if (slug) setPageSlug(slug); },
+        ()      => { /* refresh errors are silent */ },
+      );
+
+      if (allThemes.length > 0) {
+        setThemes(allThemes);
+        setCommittedLevel(resultForm.level);
+        setCommittedCount(resultForm.count);
+        setCommittedPriceMin(resultForm.priceMin);
+        setCommittedPriceMax(resultForm.priceMax);
+        setCommittedVibes(resultForm.vibes ?? []);
+        setCommittedRelatedness(resultForm.relatedness);
+        loadImages(allThemes);
+      }
     } finally {
       setRefreshing(false);
     }
