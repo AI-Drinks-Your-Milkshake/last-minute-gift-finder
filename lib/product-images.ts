@@ -22,7 +22,10 @@ import type { GiftTheme } from '@/types';
  */
 
 const BRAVE_ENDPOINT = 'https://api.search.brave.com/res/v1/images/search';
-const CACHE_PREFIX = 'gift_img:';
+// Bumped to v2 to invalidate the pre-cutout-filter cache. Anything stored
+// under the old prefix was a "first accessible URL" pick, not a cutout —
+// keeping the old prefix would let those stale URLs bypass the new filter.
+const CACHE_PREFIX = 'gift_img_v2:';
 // Reduced from 4000 — fail fast so a single bad search doesn't stall the pool.
 const LOOKUP_TIMEOUT_MS = 2500;
 // HEAD check timeout — shorter since we're only verifying a direct image URL.
@@ -36,11 +39,18 @@ const DOWNLOAD_TIMEOUT_MS = 2500;
 // tail latency bounded.
 const MAX_CUTOUT_CANDIDATES = 5;
 // Corner-sample tuning. Each corner is an NxN region in raw RGB; we accept
-// the image only if every corner's mean R, G, and B are all >= the threshold.
-// 232/255 catches typical "white" product backgrounds (which are rarely pure
-// 255,255,255 due to JPEG compression and slight studio lighting tint).
-const SAMPLE_REGION    = 8;
-const WHITE_THRESHOLD  = 232;
+// the image only if every corner passes BOTH:
+//   - mean R, G, and B are all >= WHITE_MEAN_THRESHOLD (245)
+//   - the minimum value of any single pixel's R, G, or B in the region is
+//     >= WHITE_MIN_THRESHOLD (225)
+// The mean check rules out uniform light-gray / beige backgrounds. The min
+// check catches "mostly white but with a colored intrusion" — e.g. a tiny
+// piece of the product or background bleeding into the corner of an
+// otherwise-white frame. Raised from 232 because at 232 we were letting
+// in lifestyle photos with light-colored backgrounds.
+const SAMPLE_REGION         = 16;
+const WHITE_MEAN_THRESHOLD  = 245;
+const WHITE_MIN_THRESHOLD   = 225;
 
 // Hosts whose images are usually low-signal: thumbnails, lifestyle shots,
 // listings with text overlays, or just frequently the wrong product.
@@ -223,17 +233,27 @@ async function hasWhiteBackground(bytes: Buffer): Promise<boolean> {
       const channels = info.channels;
       const pixelCount = SAMPLE_REGION * SAMPLE_REGION;
       let rSum = 0, gSum = 0, bSum = 0;
+      let rMin = 255, gMin = 255, bMin = 255;
       for (let i = 0; i < pixelCount; i++) {
         const o = i * channels;
-        rSum += data[o];
-        gSum += data[o + 1];
-        bSum += data[o + 2];
+        const r = data[o], g = data[o + 1], b = data[o + 2];
+        rSum += r; gSum += g; bSum += b;
+        if (r < rMin) rMin = r;
+        if (g < gMin) gMin = g;
+        if (b < bMin) bMin = b;
       }
       const rAvg = rSum / pixelCount;
       const gAvg = gSum / pixelCount;
       const bAvg = bSum / pixelCount;
 
-      if (rAvg < WHITE_THRESHOLD || gAvg < WHITE_THRESHOLD || bAvg < WHITE_THRESHOLD) {
+      // Mean check: rules out uniform light-gray / beige backgrounds.
+      if (rAvg < WHITE_MEAN_THRESHOLD || gAvg < WHITE_MEAN_THRESHOLD || bAvg < WHITE_MEAN_THRESHOLD) {
+        return false;
+      }
+      // Min check: a single dark/colored pixel pulls min down without
+      // moving the mean much. Catches "white background with a corner of
+      // product or shadow intruding".
+      if (rMin < WHITE_MIN_THRESHOLD || gMin < WHITE_MIN_THRESHOLD || bMin < WHITE_MIN_THRESHOLD) {
         return false;
       }
     }

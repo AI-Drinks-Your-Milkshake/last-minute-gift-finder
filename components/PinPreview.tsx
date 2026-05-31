@@ -52,6 +52,10 @@ function themesToProducts(themes: GiftTheme[]): PinProduct[] {
   const flat: PinProduct[] = [];
   for (const t of themes) {
     for (const g of t.gifts) {
+      // Only include gifts with a confirmed image URL (same rule GiftThemeSection
+      // uses: skip undefined = still loading, skip null = no image found).
+      // This keeps the pin in exact sync with what's visible in the primary grid.
+      if (typeof g.imageUrl !== 'string') continue;
       flat.push({
         title: g.title,
         priceRange: g.priceRange,
