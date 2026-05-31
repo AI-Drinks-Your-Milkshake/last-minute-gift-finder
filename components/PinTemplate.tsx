@@ -1,103 +1,157 @@
 // PinTemplate — renders one 1000×1500 Pinterest pin.
 //
-// Pure presentation component. Takes the title, an eyebrow string,
-// a vibe slug (looked up in AESTHETICS for theming), and a flat list
-// of products. No knowledge of SearchConfig or static-guide pipeline —
-// the wizard's PinPreview wrapper does all the data shaping.
+// Pure presentation component. Takes the title, a vibe slug (looked up
+// in AESTHETICS for theming), and a flat list of products. No knowledge
+// of SearchConfig or static-guide pipeline — the wizard's PinPreview
+// wrapper does all the data shaping.
 //
 // Layout (top → bottom):
-//   • Top product zone (~40% of remaining height): first ~40% of products
-//   • Title band (auto): eyebrow + centered title in vibe display font
-//   • Bottom product zone (~60% of remaining): remaining products
-//   • Strix mark in bottom-right (small, low opacity)
+//   • Top product zone (≈ half remaining height) — white background,
+//     items packed into a 5-column brick-staggered grid.
+//   • Title band (~160px) — colored background driven by the active
+//     vibe, just the page title (no eyebrow).
+//   • Bottom product zone (≈ half remaining height) — same brick grid,
+//     continuing the aspect-ratio sequence from the top.
+//   • Strix mark in bottom-right (small, low opacity).
 //
 // Theming: the active vibe's `cssOverrides` are inlined as CSS custom
-// properties on the [data-pin-root] element. The template reads only
-// from CSS variables.
+// properties on the [data-pin-root] element. Product zones are always
+// white (cutout product photos read against white reliably across all
+// vibes), so vibe colors only affect the title band, accents, and the
+// optional `--pin-band-bg` / `--pin-accent` fallbacks the band reads.
 
 import type { PinProduct } from '@/types';
 import { getAesthetic } from '@/lib/aesthetics';
 
 interface Props {
-  title: string;                // e.g. "Coquette Birthday Gifts for Teen Girls"
-  eyebrow?: string;             // e.g. "BIRTHDAY · TEEN GIRL" — already uppercased
-  vibe?: string;                // slug from AESTHETICS, or undefined for default
+  title:   string;            // e.g. "Coquette Birthday Gifts for Teen Girls"
+  /** Eyebrow text. Currently unrendered — kept in the interface so callers
+   *  don't break, but the pin no longer shows an eyebrow above the title. */
+  eyebrow?: string;
+  vibe?:   string;            // slug from AESTHETICS, or undefined for default
   products: PinProduct[];
 }
 
-const PIN_WIDTH = 1000;
+const PIN_WIDTH  = 1000;
 const PIN_HEIGHT = 1500;
 
-// ── Justified-row layout ──────────────────────────────────────────────────
-// Every row fills the full zone width. Items within a row share the same
-// height, but heights vary row-to-row based on the aspect ratios of the
-// items it contains — the "Flickr / justified gallery" look.
+// ── Brick-staggered grid layout ──────────────────────────────────────────
+// Items are distributed round-robin across NUM_COLUMNS so every column
+// gets the same item count. Alternating columns are offset downward by
+// COL_OFFSET pixels, creating a subtle brick stagger — the columns no
+// longer all start at the same y, which is what makes a Pinterest board
+// read as a puzzle rather than a grid.
 //
-// Algorithm:
-//   Pass 1 — greedy grouping: add items to a row until the next item would
-//             overflow ZONE_W at TARGET_ROW_H.
-//   Pass 2 — per-row height: solve h·ΣAR + (n−1)·gap = ZONE_W.
-//             Items then have width = h·AR_i, summing to exactly ZONE_W.
+// Each column's image heights are then scaled so the column total +
+// captions + gaps fills the (zone height − max column offset) exactly.
+// All columns share the same effective inner height, so items are
+// roughly uniform in size across columns; the stagger comes purely
+// from each column's starting y-offset.
 
-const ZONE_W      = PIN_WIDTH - 112;  // 888px (56px side padding each side)
-const ROW_GAP     = 4;               // px between rows and between items
-const TARGET_ROW_H = 160;            // guide height for the grouping pass only
+const NUM_COLUMNS   = 5;
+const ZONE_SIDE_PAD = 20;
+const ZONE_PAD_V    = 8;
+const GRID_GAP      = 5;
+const CAPTION_H     = 26;   // 2 lines at ~11px font + small bottom padding
 
-// Deterministic aspect ratios (width ÷ height). Prime length (13) so the
-// pattern never aligns with common items-per-row counts (2–6).
-const ITEM_ASPECTS = [1.0, 0.75, 1.33, 0.67, 1.2, 0.8, 1.5, 1.0, 0.67, 1.33, 0.75, 1.0, 0.9];
+// Alternating brick offset: cols 1 and 3 start ~30px below cols 0/2/4.
+// Subtle enough to feel organic but big enough to read as stagger.
+const COL_OFFSETS = [0, 30, 0, 30, 0];
+const MAX_COL_OFFSET = Math.max(...COL_OFFSETS);
 
-interface RowSpec {
-  items: PinProduct[];
-  height: number;   // exact px — all rows fill ZONE_W
-  widths: number[]; // px per item, proportional to aspect ratio
+const ZONE_W = PIN_WIDTH - 2 * ZONE_SIDE_PAD;
+const COL_W  = (ZONE_W - GRID_GAP * (NUM_COLUMNS - 1)) / NUM_COLUMNS;
+
+// Title-band height — title only, no eyebrow. Sized to fit a 2-line h1
+// + tight padding. Shorter than the previous 220px band, giving each
+// product zone an extra ~30px of vertical room.
+const BAND_H = 160;
+
+// Reserve a strip at the very bottom of the bottom zone for the strix.com
+// watermark so it never overlaps a product image in the rightmost column.
+const WATERMARK_RESERVED = 36;
+
+const ZONE_OUTER_H    = (PIN_HEIGHT - BAND_H) / 2;
+const TOP_ZONE_INNER  = ZONE_OUTER_H - 2 * ZONE_PAD_V;
+const BOT_ZONE_INNER  = ZONE_OUTER_H - ZONE_PAD_V - WATERMARK_RESERVED;
+
+// Low-variance aspect ratios (height ÷ width). Length 11 (prime) so the
+// pattern never aligns with NUM_COLUMNS. The per-column scaler will adjust
+// these so the column fills the available height; these values just set
+// the relative size ratios between items within each column.
+const ITEM_ASPECTS = [0.85, 0.92, 0.78, 1.0, 0.82, 0.88, 0.95, 0.8, 0.9, 0.83, 0.97];
+
+// White zones — hardcoded so vibe overrides can't accidentally repaint them.
+// Cutout product photos rely on the contrast against white.
+const PRODUCT_ZONE_BG    = '#FFFFFF';
+const PRODUCT_TEXT_COLOR = '#1F1F2A';
+
+interface CellData {
+  product: PinProduct;
+  imgH:    number;   // image area height in px, after per-column scaling
 }
 
-// indexOffset threads the aspect pattern across zones so top and bottom
-// halves don't accidentally start with the same sequence.
-function buildJustifiedRows(products: PinProduct[], indexOffset: number): RowSpec[] {
-  const rows: RowSpec[] = [];
-  let i = 0;
-  while (i < products.length) {
-    let j = i;
-    let sumAr = 0;
-    while (j < products.length) {
-      const ar = ITEM_ASPECTS[(indexOffset + j) % ITEM_ASPECTS.length];
-      const n = j - i + 1;
-      if ((sumAr + ar) * TARGET_ROW_H + (n - 1) * ROW_GAP > ZONE_W && j > i) break;
-      sumAr += ar;
-      j++;
-    }
-    const n      = j - i;
-    const h      = (ZONE_W - (n - 1) * ROW_GAP) / sumAr;
-    const availW = ZONE_W - (n - 1) * ROW_GAP;
-    rows.push({
-      items:  products.slice(i, j),
-      height: h,
-      widths: Array.from({ length: n }, (_, k) =>
-        (ITEM_ASPECTS[(indexOffset + i + k) % ITEM_ASPECTS.length] / sumAr) * availW,
-      ),
-    });
-    i = j;
+interface ColumnData {
+  items:     CellData[];
+  offsetTop: number;
+}
+
+function packBricks(
+  products: PinProduct[],
+  indexOffset: number,
+  zoneInnerH: number,
+): ColumnData[] {
+  if (products.length === 0) {
+    return Array.from({ length: NUM_COLUMNS }, () => ({ items: [], offsetTop: 0 }));
   }
-  return rows;
+
+  // Round-robin distribute — keeps column item counts within ±1 of each
+  // other so the per-column scaler produces items of similar sizes.
+  const buckets: { product: PinProduct; aspect: number }[][] =
+    Array.from({ length: NUM_COLUMNS }, () => []);
+
+  products.forEach((product, i) => {
+    const aspect = ITEM_ASPECTS[(indexOffset + i) % ITEM_ASPECTS.length];
+    buckets[i % NUM_COLUMNS].push({ product, aspect });
+  });
+
+  // All columns share the same effective vertical content area
+  // (zoneInnerH − MAX_COL_OFFSET) so item sizes stay consistent across
+  // columns even though each column starts at a different y.
+  const sharedAvail = zoneInnerH - MAX_COL_OFFSET;
+
+  return buckets.map((items, colIdx) => {
+    if (items.length === 0) return { items: [], offsetTop: COL_OFFSETS[colIdx] };
+    const naturalImgH = items.reduce((sum, x) => sum + COL_W * x.aspect, 0);
+    const overhead    = items.length * CAPTION_H + Math.max(0, items.length - 1) * GRID_GAP;
+    const availImgH   = Math.max(50, sharedAvail - overhead);
+    const scale       = availImgH / naturalImgH;
+    return {
+      items: items.map(({ product, aspect }) => ({
+        product,
+        imgH: COL_W * aspect * scale,
+      })),
+      offsetTop: COL_OFFSETS[colIdx],
+    };
+  });
 }
 
-// Split products into "above title" and "below title" zones.
+// 50/50 split. Pairs with NUM_COLUMNS=5 and 30 products to give exactly
+// 3 items per column in each zone — clean rows for the brick stagger.
 function splitProducts<T>(products: T[]): { top: T[]; bottom: T[] } {
-  const topCount = Math.floor(products.length * 0.4);
+  const topCount = Math.ceil(products.length / 2);
   return {
     top:    products.slice(0, topCount),
     bottom: products.slice(topCount),
   };
 }
 
-export default function PinTemplate({ title, eyebrow, vibe, products }: Props) {
+export default function PinTemplate({ title, vibe, products }: Props) {
   const aesthetic = vibe ? getAesthetic(vibe) : undefined;
   const { top, bottom } = splitProducts(products);
 
-  // Inline CSS custom properties from the vibe overlay. React typings
-  // don't model custom properties, so cast through CSSProperties.
+  // Inline CSS custom properties from the vibe overlay. React typings don't
+  // model custom properties, so cast through CSSProperties.
   const vibeStyle: React.CSSProperties = {
     ...(aesthetic?.cssOverrides as React.CSSProperties),
   };
@@ -109,88 +163,75 @@ export default function PinTemplate({ title, eyebrow, vibe, products }: Props) {
       style={{
         width: PIN_WIDTH,
         height: PIN_HEIGHT,
-        // Default is dark so white product-image cards pop against it.
-        // Vibe cssOverrides replace --pin-bg / --pin-text / --pin-text-soft
-        // with their own palette (light vibes → pastel bg + dark text,
-        // dark vibes → deep bg + light text). White tiles work in both cases.
-        backgroundColor: 'var(--pin-bg, #16161e)',
-        color: 'var(--pin-text, #f0f0f8)',
+        // Pin root is white so product zones inherit it. The title band paints
+        // its own colored background on top, taking the vibe's accent or
+        // explicit --pin-band-bg / --pin-bg as the fallback chain.
+        backgroundColor: PRODUCT_ZONE_BG,
+        color: PRODUCT_TEXT_COLOR,
         fontFamily: 'inherit',
         display: 'grid',
-        gridTemplateRows: '1fr auto 1.05fr',
+        gridTemplateRows: `${ZONE_OUTER_H}px ${BAND_H}px ${ZONE_OUTER_H}px`,
         overflow: 'hidden',
         position: 'relative',
         ...vibeStyle,
       }}
     >
       {/* ── Top product zone ───────────────────────────────── */}
-      <ProductGrid products={top} placement="top" indexOffset={0} />
+      <ProductGrid products={top} placement="top" indexOffset={0} zoneInnerH={TOP_ZONE_INNER} />
 
-      {/* ── Title band (vertically centered) ───────────────── */}
+      {/* ── Title band ─────────────────────────────────────── */}
       <section
         style={{
-          padding: '24px 56px',
+          padding: '20px 56px',
           textAlign: 'center',
-          // Colored band separates the product zones visually.
-          // --pin-band-bg lets individual vibes override the band color;
-          // falls back to --pin-accent, then a semi-transparent dark overlay
-          // that reads on both light and dark --pin-bg values.
-          backgroundColor: 'var(--pin-band-bg, var(--pin-accent, rgba(0,0,0,0.35)))',
+          // Colored band separates the product zones visually. The band keeps
+          // its colored background even though product zones are white —
+          // --pin-band-bg lets vibes override; falls back to --pin-accent,
+          // then --pin-bg, then a dark overlay.
+          backgroundColor:
+            'var(--pin-band-bg, var(--pin-accent, var(--pin-bg, rgba(0,0,0,0.35))))',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
+          height: BAND_H,
+          boxSizing: 'border-box',
         }}
       >
-        {eyebrow && (
-          <p
-            style={{
-              margin: 0,
-              fontSize: 17,
-              letterSpacing: '0.32em',
-              textTransform: 'uppercase',
-              color: 'var(--pin-text-soft, rgba(255,255,255,0.55))',
-              fontWeight: 600,
-            }}
-          >
-            {eyebrow}
-          </p>
-        )}
-
         <h1
           style={{
-            margin: eyebrow ? '14px auto 0' : '0 auto',
+            margin: '0 auto',
             fontFamily: 'var(--font-display, inherit)',
-            fontSize: 60,
+            fontSize: 54,
             fontWeight: 600,
             lineHeight: 1.05,
             letterSpacing: '-0.015em',
             color: 'var(--pin-text, #f0f0f8)',
             textAlign: 'center',
-            maxWidth: '90%',
+            maxWidth: '94%',
           }}
         >
           {title}
         </h1>
       </section>
 
-      {/* ── Bottom product zone ────────────────────────────── */}
-      <ProductGrid products={bottom} placement="bottom" indexOffset={top.length} />
+      {/* ── Bottom product zone ───────────────────────────── */}
+      <ProductGrid products={bottom} placement="bottom" indexOffset={top.length} zoneInnerH={BOT_ZONE_INNER} />
 
-      {/* ── Strix watermark ───────────────────────────────── */}
+      {/* ── Strix watermark ─────────────────────────────── */}
       <div
         style={{
           position: 'absolute',
-          bottom: 28,
-          right: 56,
+          bottom: 14,
+          right: 24,
           display: 'flex',
           alignItems: 'center',
           gap: 8,
           fontSize: 16,
           fontWeight: 600,
           letterSpacing: '0.04em',
-          color: 'var(--pin-text-soft, rgba(255,255,255,0.4))',
-          opacity: 0.7,
+          color: 'rgba(80, 80, 100, 0.75)',
+          opacity: 0.9,
         }}
       >
         <span style={{ color: 'var(--pin-accent, var(--accent))' }}>✦</span>
@@ -204,51 +245,49 @@ function ProductGrid({
   products,
   placement,
   indexOffset,
+  zoneInnerH,
 }: {
-  products: PinProduct[];
-  placement: 'top' | 'bottom';
+  products:    PinProduct[];
+  placement:   'top' | 'bottom';
   indexOffset: number;
+  zoneInnerH:  number;
 }) {
-  if (products.length === 0) return <div />;
+  if (products.length === 0) {
+    return <div style={{ backgroundColor: PRODUCT_ZONE_BG }} />;
+  }
 
-  const rows = buildJustifiedRows(products, indexOffset);
+  const columns = packBricks(products, indexOffset, zoneInnerH);
 
   return (
     <section
       style={{
-        padding:
-          placement === 'top'
-            ? '44px 56px 28px'
-            : '28px 56px 70px', // bottom padding leaves room for the Strix watermark
+        backgroundColor: PRODUCT_ZONE_BG,
+        padding: placement === 'top'
+          ? `${ZONE_PAD_V}px ${ZONE_SIDE_PAD}px ${ZONE_PAD_V}px`
+          : `${ZONE_PAD_V}px ${ZONE_SIDE_PAD}px ${WATERMARK_RESERVED}px`,
         display: 'flex',
-        flexDirection: 'column',
-        gap: ROW_GAP,
-        overflow: 'hidden',
+        gap: GRID_GAP,
         boxSizing: 'border-box',
+        overflow: 'hidden',
+        height: '100%',
+        alignItems: 'flex-start', // so each col starts at the top, then we
+                                  // push down via marginTop for the offset
       }}
     >
-      {rows.map((row, ri) => (
+      {columns.map((col, ci) => (
         <div
-          key={ri}
+          key={ci}
           style={{
+            flex: 1,
             display: 'flex',
-            gap: ROW_GAP,
-            height: row.height,
-            flexShrink: 0,
+            flexDirection: 'column',
+            gap: GRID_GAP,
+            minWidth: 0,
+            marginTop: col.offsetTop,
           }}
         >
-          {row.items.map((product, ii) => (
-            <div
-              key={ii}
-              style={{
-                width: row.widths[ii],
-                height: '100%',
-                flexShrink: 0,
-                overflow: 'hidden',
-              }}
-            >
-              <ProductCell product={product} />
-            </div>
+          {col.items.map((item, ii) => (
+            <ProductCell key={ii} product={item.product} imgHeight={item.imgH} />
           ))}
         </div>
       ))}
@@ -256,30 +295,31 @@ function ProductGrid({
   );
 }
 
-function ProductCell({ product }: { product: PinProduct }) {
+function ProductCell({
+  product,
+  imgHeight,
+}: {
+  product:   PinProduct;
+  imgHeight: number;
+}) {
   const hasImage = Boolean(product.imageUrl);
 
   return (
-    // No card background — products float directly on the pin's --pin-bg.
-    // Images cut out against the background; text uses --pin-text so it
-    // remains readable on both light and dark vibe backgrounds.
+    // No card chrome — products float directly on the white zone background.
+    // Cutout product photos sit cleanly on white in every vibe.
     <div
       style={{
-        height: '100%',
+        backgroundColor: PRODUCT_ZONE_BG,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        padding: '12px 12px 10px',
-        boxSizing: 'border-box',
+        gap: 2,
       }}
     >
-      {/* Image area fills available height; no fixed aspectRatio so it never
-          overflows the grid row. */}
       <div
         style={{
-          flex: 1,
           width: '100%',
-          minHeight: 0,
+          height: imgHeight,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -292,7 +332,7 @@ function ProductCell({ product }: { product: PinProduct }) {
             src={product.imageUrl as string}
             alt={product.title}
             style={{
-              maxWidth: '92%',
+              maxWidth: '100%',
               maxHeight: '100%',
               width: 'auto',
               height: 'auto',
@@ -305,22 +345,23 @@ function ProductCell({ product }: { product: PinProduct }) {
         )}
       </div>
 
-      {/* Text uses --pin-text so it reads on whatever vibe background is behind it. */}
+      {/* Caption uses a fixed dark color since the zone is always white. */}
       <p
         style={{
-          margin: '8px 0 0',
-          fontSize: 13,
-          lineHeight: 1.25,
+          margin: 0,
+          fontSize: 11,
+          lineHeight: 1.15,
           textAlign: 'center',
-          color: 'var(--pin-text, #f0f0f8)',
+          color: PRODUCT_TEXT_COLOR,
           fontWeight: 500,
-          maxWidth: '95%',
+          maxWidth: '100%',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           display: '-webkit-box',
           WebkitLineClamp: 2,
           WebkitBoxOrient: 'vertical',
           flexShrink: 0,
+          padding: '0 2px',
         }}
       >
         {product.title}

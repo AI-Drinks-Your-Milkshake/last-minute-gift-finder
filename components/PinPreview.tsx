@@ -43,7 +43,7 @@ interface Props {
 
 const NATIVE_WIDTH = 1000;
 const NATIVE_HEIGHT = 1500;
-const MAX_PRODUCTS = 20;  // cap for the pin grid
+const MAX_PRODUCTS = 30;  // cap for the pin grid (matches PinTemplate capacity)
 
 // Flatten the wizard's themed structure into a single PinProduct list.
 // Themes preserve order (direct → adjacent → exploratory), so the most
