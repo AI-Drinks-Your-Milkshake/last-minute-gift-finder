@@ -28,24 +28,66 @@ interface Props {
 const PIN_WIDTH = 1000;
 const PIN_HEIGHT = 1500;
 
-// Best column count for a flatlay grid of N products. Pinterest pins
-// are vertical (1000×1500), so we prefer cell-aspect close to square
-// — meaning more rows than columns when count gets large.
-function gridCols(count: number): number {
-  if (count <= 2) return Math.max(count, 1);
-  if (count <= 4) return 2;
-  if (count <= 6) return 3;
-  if (count <= 12) return 4;
-  return 5;
+// ── Justified-row layout ──────────────────────────────────────────────────
+// Every row fills the full zone width. Items within a row share the same
+// height, but heights vary row-to-row based on the aspect ratios of the
+// items it contains — the "Flickr / justified gallery" look.
+//
+// Algorithm:
+//   Pass 1 — greedy grouping: add items to a row until the next item would
+//             overflow ZONE_W at TARGET_ROW_H.
+//   Pass 2 — per-row height: solve h·ΣAR + (n−1)·gap = ZONE_W.
+//             Items then have width = h·AR_i, summing to exactly ZONE_W.
+
+const ZONE_W      = PIN_WIDTH - 112;  // 888px (56px side padding each side)
+const ROW_GAP     = 4;               // px between rows and between items
+const TARGET_ROW_H = 160;            // guide height for the grouping pass only
+
+// Deterministic aspect ratios (width ÷ height). Prime length (13) so the
+// pattern never aligns with common items-per-row counts (2–6).
+const ITEM_ASPECTS = [1.0, 0.75, 1.33, 0.67, 1.2, 0.8, 1.5, 1.0, 0.67, 1.33, 0.75, 1.0, 0.9];
+
+interface RowSpec {
+  items: PinProduct[];
+  height: number;   // exact px — all rows fill ZONE_W
+  widths: number[]; // px per item, proportional to aspect ratio
 }
 
-// Split products into "above title" and "below title" zones. Slight
-// bias toward the bottom feels visually grounded — title → list flows
-// downward.
+// indexOffset threads the aspect pattern across zones so top and bottom
+// halves don't accidentally start with the same sequence.
+function buildJustifiedRows(products: PinProduct[], indexOffset: number): RowSpec[] {
+  const rows: RowSpec[] = [];
+  let i = 0;
+  while (i < products.length) {
+    let j = i;
+    let sumAr = 0;
+    while (j < products.length) {
+      const ar = ITEM_ASPECTS[(indexOffset + j) % ITEM_ASPECTS.length];
+      const n = j - i + 1;
+      if ((sumAr + ar) * TARGET_ROW_H + (n - 1) * ROW_GAP > ZONE_W && j > i) break;
+      sumAr += ar;
+      j++;
+    }
+    const n      = j - i;
+    const h      = (ZONE_W - (n - 1) * ROW_GAP) / sumAr;
+    const availW = ZONE_W - (n - 1) * ROW_GAP;
+    rows.push({
+      items:  products.slice(i, j),
+      height: h,
+      widths: Array.from({ length: n }, (_, k) =>
+        (ITEM_ASPECTS[(indexOffset + i + k) % ITEM_ASPECTS.length] / sumAr) * availW,
+      ),
+    });
+    i = j;
+  }
+  return rows;
+}
+
+// Split products into "above title" and "below title" zones.
 function splitProducts<T>(products: T[]): { top: T[]; bottom: T[] } {
   const topCount = Math.floor(products.length * 0.4);
   return {
-    top: products.slice(0, topCount),
+    top:    products.slice(0, topCount),
     bottom: products.slice(topCount),
   };
 }
@@ -82,7 +124,7 @@ export default function PinTemplate({ title, eyebrow, vibe, products }: Props) {
       }}
     >
       {/* ── Top product zone ───────────────────────────────── */}
-      <ProductGrid products={top} placement="top" />
+      <ProductGrid products={top} placement="top" indexOffset={0} />
 
       {/* ── Title band (vertically centered) ───────────────── */}
       <section
@@ -133,7 +175,7 @@ export default function PinTemplate({ title, eyebrow, vibe, products }: Props) {
       </section>
 
       {/* ── Bottom product zone ────────────────────────────── */}
-      <ProductGrid products={bottom} placement="bottom" />
+      <ProductGrid products={bottom} placement="bottom" indexOffset={top.length} />
 
       {/* ── Strix watermark ───────────────────────────────── */}
       <div
@@ -161,18 +203,15 @@ export default function PinTemplate({ title, eyebrow, vibe, products }: Props) {
 function ProductGrid({
   products,
   placement,
+  indexOffset,
 }: {
   products: PinProduct[];
   placement: 'top' | 'bottom';
+  indexOffset: number;
 }) {
   if (products.length === 0) return <div />;
 
-  const cols = gridCols(products.length);
-  // Masonry column layout: items stack top-to-bottom within each column,
-  // each at a varying height so the result looks organic rather than grid-locked.
-  // Prime-length pattern (11) avoids aligning with common col counts (3, 4, 5)
-  // so adjacent items within a column are always visually distinct heights.
-  const ITEM_HEIGHTS = [148, 118, 182, 132, 162, 112, 158, 142, 172, 124, 155];
+  const rows = buildJustifiedRows(products, indexOffset);
 
   return (
     <section
@@ -180,24 +219,37 @@ function ProductGrid({
         padding:
           placement === 'top'
             ? '44px 56px 28px'
-            : '28px 56px 70px', // leaves room for the Strix watermark
-        columnCount: cols,
-        columnGap: 4,
-        height: '100%',
+            : '28px 56px 70px', // bottom padding leaves room for the Strix watermark
+        display: 'flex',
+        flexDirection: 'column',
+        gap: ROW_GAP,
         overflow: 'hidden',
         boxSizing: 'border-box',
       }}
     >
-      {products.map((p, i) => (
+      {rows.map((row, ri) => (
         <div
-          key={i}
+          key={ri}
           style={{
-            breakInside: 'avoid',
-            marginBottom: 4,
-            height: ITEM_HEIGHTS[i % ITEM_HEIGHTS.length],
+            display: 'flex',
+            gap: ROW_GAP,
+            height: row.height,
+            flexShrink: 0,
           }}
         >
-          <ProductCell product={p} />
+          {row.items.map((product, ii) => (
+            <div
+              key={ii}
+              style={{
+                width: row.widths[ii],
+                height: '100%',
+                flexShrink: 0,
+                overflow: 'hidden',
+              }}
+            >
+              <ProductCell product={product} />
+            </div>
+          ))}
         </div>
       ))}
     </section>
