@@ -9,19 +9,20 @@ import type { GiftTheme } from '@/types';
  *   2. On miss, call Brave Image Search.
  *   3. Score the top results, demoting Pinterest/Etsy/eBay/marketplace listings
  *      and preferring manufacturer / major-retailer product pages.
- *   4. Fetch the winning page's HTML and pull <meta property="og:image"> —
- *      almost always a higher-quality hero shot than the image-search thumbnail.
- *      Fall back to Brave's own image URL if og:image isn't present.
+ *   4. HEAD-check the best Brave image URL directly — no og:image second hop.
+ *      Dropping the HTML page fetch removes 2 of 3 HTTP round-trips per gift.
  *   5. Cache the result in KV (no expiry — product photos don't change).
  *
  * All failures degrade gracefully: lookup errors, timeouts, missing API key,
- * missing KV — every path returns null rather than throwing, so image
- * enrichment never blocks a search response.
+ * missing KV — every path returns null rather than throwing.
  */
 
 const BRAVE_ENDPOINT = 'https://api.search.brave.com/res/v1/images/search';
 const CACHE_PREFIX = 'gift_img:';
-const LOOKUP_TIMEOUT_MS = 4000;
+// Reduced from 4000 — fail fast so a single bad search doesn't stall the pool.
+const LOOKUP_TIMEOUT_MS = 2500;
+// HEAD check timeout — shorter since we're only verifying a direct image URL.
+const HEAD_TIMEOUT_MS = 1500;
 
 // Hosts whose images are usually low-signal: thumbnails, lifestyle shots,
 // listings with text overlays, or just frequently the wrong product.
@@ -37,8 +38,6 @@ const DEMOTED_HOSTS = [
 ];
 
 // Substrings that signal a real product page (manufacturer or major retailer).
-// These are cheap hints, not a comprehensive list — the goal is to push clean
-// product shots up the ranking, not to enumerate every legitimate source.
 const PREFERRED_HINTS = [
   '/products/', '/product/', '/p/', '/dp/',
   'amazon.com', 'rei.com', 'bestbuy.com', 'target.com',
@@ -110,46 +109,10 @@ async function braveSearch(query: string): Promise<BraveImageResult[]> {
   return Array.isArray(data.results) ? data.results : [];
 }
 
-async function extractOgImage(pageUrl: string): Promise<string | null> {
-  try {
-    const res = await fetchWithTimeout(
-      pageUrl,
-      {
-        headers: {
-          // Bare-bones UA — some sites 403 default fetch User-Agent.
-          'User-Agent':
-            'Mozilla/5.0 (compatible; LastMinuteGiftFinder/1.0; +https://github.com)',
-          'Accept': 'text/html,application/xhtml+xml',
-        },
-        redirect: 'follow',
-      },
-      LOOKUP_TIMEOUT_MS,
-    );
-    if (!res.ok) return null;
-    const html = await res.text();
-    // og:image is in <head>; truncate to avoid scanning huge bodies
-    const head = html.split('</head>')[0] ?? html.slice(0, 200_000);
-    // Match property/content in either order
-    const m =
-      head.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ||
-      head.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
-    if (!m) return null;
-    const candidate = m[1];
-    // Must be an absolute https/http URL
-    if (!/^https?:\/\//i.test(candidate)) return null;
-    return candidate;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Verify that a candidate image URL actually loads in a browser context:
  * - HTTP 200 (no 403 hotlink block or 404)
- * - Content-Type starts with "image/" (rules out HTML login walls and logos
- *   served as text/html, as well as tiny GIF tracking pixels)
- *
- * Uses a short timeout so a single bad URL doesn't stall the whole request.
+ * - Content-Type starts with "image/" (rules out HTML login walls etc.)
  */
 async function isImageAccessible(url: string): Promise<boolean> {
   try {
@@ -162,7 +125,7 @@ async function isImageAccessible(url: string): Promise<boolean> {
             'Mozilla/5.0 (compatible; LastMinuteGiftFinder/1.0; +https://github.com)',
         },
       },
-      2500,
+      HEAD_TIMEOUT_MS,
     );
     if (!res.ok) return false;
     const ct = res.headers.get('content-type') ?? '';
@@ -184,18 +147,9 @@ async function lookupImage(searchTerms: string): Promise<string | null> {
 
   const ranked = [...results].sort((a, b) => scoreResult(b) - scoreResult(a));
 
-  // Try each ranked result in order until we find one with an accessible image.
-  // The og:image second hop gives higher quality; fall back to the raw Brave
-  // thumbnail only if og:image is absent. Skip any candidate whose final URL
-  // fails the HEAD accessibility check (hotlink-blocked, 404, or not an image).
+  // Use Brave's direct image URL — no og:image second hop.
+  // This cuts the per-gift round-trips from 3 down to 2 (search + HEAD check).
   for (const candidate of ranked) {
-    // og:image second hop
-    if (candidate.url) {
-      const og = await extractOgImage(candidate.url);
-      if (og && await isImageAccessible(og)) return og;
-    }
-
-    // Raw Brave URL fallback
     const rawUrl = candidate.properties?.url ?? candidate.thumbnail?.src ?? null;
     if (rawUrl && await isImageAccessible(rawUrl)) return rawUrl;
   }

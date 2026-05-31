@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getGiftIdeas } from '@/lib/anthropic';
 import { addRecentSearch } from '@/lib/kv';
-import { enrichThemesWithImages } from '@/lib/product-images';
 import { getTrendingProducts } from '@/lib/trends';
 import { AESTHETIC_VALUES, getAesthetic } from '@/lib/aesthetics';
 import {
@@ -17,6 +16,9 @@ const COUNT_MAX = 25;
 const VALID_LEVELS = ['casual', 'interested', 'enthusiast'] as const;
 const VALID_RELATEDNESS = ['similar', 'mixed', 'adventurous'] as const;
 const MAX_VIBES = 2;
+// Max time we'll wait for trending products before starting Claude anyway.
+// Trends feed into Claude so every extra ms here adds directly to response time.
+const TRENDS_TIMEOUT_MS = 2000;
 
 type Level = (typeof VALID_LEVELS)[number];
 type Relatedness = (typeof VALID_RELATEDNESS)[number];
@@ -71,9 +73,7 @@ export async function POST(request: NextRequest) {
     return badRequest('Invalid level.');
   }
 
-  // Optional relatedness — shapes per-theme gift distribution so visible
-  // count matches what the user requested. Defaults to 'adventurous' so
-  // old clients (or direct API calls) continue to work unchanged.
+  // Optional relatedness
   let relatedness: Relatedness = 'adventurous';
   if (body.relatedness !== undefined) {
     if (
@@ -85,9 +85,7 @@ export async function POST(request: NextRequest) {
     relatedness = body.relatedness as Relatedness;
   }
 
-  // Optional vibes — must be an array of strings from AESTHETIC_VALUES,
-  // with at most MAX_VIBES entries. Reject malformed values rather than
-  // silently dropping them so the client surfaces the bug.
+  // Optional vibes
   let vibes: string[] | undefined;
   if (body.vibes !== undefined) {
     if (!Array.isArray(body.vibes)) {
@@ -103,23 +101,20 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // Fetch currently-trending product names via Brave Web Search, then feed
-    // them into the Claude prompt as in-context examples. Patches Claude's
-    // training cutoff (Aug 2025 for Sonnet 4.6 vs. today). Failures are
-    // silent — getTrendingProducts() returns [] if Brave is unconfigured or
-    // the call fails, and the main flow proceeds without trending hints.
-    const trendingProducts = await getTrendingProducts({
-      recipient,
-      occasion,
-      interests,
-      vibes,
-    });
+    // Fire trending fetch immediately. Cap the wait at TRENDS_TIMEOUT_MS so
+    // Claude isn't blocked longer than necessary — trends are an enrichment,
+    // not a hard dependency. If the search comes back after the cap, Claude
+    // just runs without trending hints (graceful degradation).
+    const trendingPromise = getTrendingProducts({ recipient, occasion, interests, vibes });
+    const trendingProducts = await Promise.race([
+      trendingPromise,
+      new Promise<string[]>((resolve) => setTimeout(() => resolve([]), TRENDS_TIMEOUT_MS)),
+    ]);
 
-    // Request ~35% more gifts than the user asked for. After image validation
-    // filters out broken/inaccessible images the client will still have enough
-    // cards to fill the requested count. Cap at 40 to keep Claude response time
-    // reasonable. The client trims display to `count` via visibleThemes.
-    const bufferedCount = Math.min(40, Math.ceil(count * 1.35));
+    // Buffer 15% above the requested count (reduced from 35%) so we have
+    // a small cushion after client-side image filtering. Cap at 35.
+    // Images are now loaded client-side, so there's no need for a large buffer.
+    const bufferedCount = Math.min(35, Math.ceil(count * 1.15));
 
     const themes = await getGiftIdeas({
       recipient,
@@ -135,23 +130,16 @@ export async function POST(request: NextRequest) {
       trendingProducts,
     });
 
-    // Enrich each gift with a product image URL via Brave Image Search +
-    // og:image second hop, cached in KV. Mutates themes in place. Never
-    // throws — failed lookups leave imageUrl as null so the UI falls back
-    // to the emoji-only card.
-    await enrichThemesWithImages(themes);
-
     // ── Build the public page slug ──────────────────────────────────────────
-    // Slug is derived from the pin title formula so the URL matches the pin.
-    // Pattern: "{vibe}-{occasion}-gifts-for-{recipient-plural}"
     const recipientPlural  = pluralizeRecipient(recipient);
     const vibeLabel        = vibes?.[0] ? getAesthetic(vibes[0])?.label : undefined;
     const primaryInterest  = extractPrimaryInterest(interests);
     const pageTitle        = buildPinTitle({ vibeLabel, occasion, recipientPlural, primaryInterest: primaryInterest ?? undefined });
     const pageSlug         = buildSlug(pageTitle);
 
-    // Persist full results so the public page can read them without re-running
-    // the search. Fire-and-forget — KV failure is non-fatal.
+    // Persist results for the public /g/ page. Fire-and-forget — KV failure
+    // is non-fatal. Images are NOT included here (they're loaded client-side);
+    // the public page renders emoji cards which is fine for SEO/sharing.
     savePageResult(pageSlug, {
       title: pageTitle,
       recipient,
@@ -164,14 +152,16 @@ export async function POST(request: NextRequest) {
       createdAt: Date.now(),
     }).catch((err) => console.error('[route] page-results write failed:', err));
 
-    // Await the KV write — fire-and-forget is unreliable in serverless
-    // (the function terminates before the async write completes)
+    // Await the KV write for recent searches — fire-and-forget is unreliable
+    // in serverless (the function may terminate before the async write completes).
     await addRecentSearch({
       recipient,
       occasion,
       timestamp: Date.now(),
     }).catch((err) => console.error('Failed to save recent search:', err));
 
+    // Return themes immediately — images are NOT included.
+    // The client calls /api/images after cards are rendered to load them lazily.
     return NextResponse.json({ themes, pageSlug });
   } catch (err) {
     console.error('Gift search error:', err);

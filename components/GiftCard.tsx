@@ -36,16 +36,15 @@ export default function GiftCard({ gift }: Props) {
   const tier = getPriceTier(gift.priceRange);
   const { label, bg, color } = BADGE[tier];
 
-  // Image fallback state: if the URL fails to load (CDN gone, hotlink blocked,
-  // 404, etc.) we drop back to the emoji-only header.
+  // Track browser-side load failure separately from the server-side null.
   const [imageBroken, setImageBroken] = useState(false);
-  const showImage = Boolean(gift.imageUrl) && !imageBroken;
 
-  // If the image URL fails to load in the browser (hotlink block, CDN gone,
-  // etc.), hide this card entirely rather than showing an emoji fallback.
-  // GiftThemeSection already filtered out null imageUrls server-side, so any
-  // remaining failure is a live load error — hiding keeps the grid clean.
-  if (imageBroken) return null;
+  // Three image states:
+  //   undefined → still loading (show shimmer skeleton)
+  //   null      → no image found (show emoji)
+  //   string    → image URL ready (show image, fall back to emoji on load error)
+  const imageLoading = gift.imageUrl === undefined;
+  const showImage    = typeof gift.imageUrl === 'string' && !imageBroken;
 
   return (
     <div
@@ -63,9 +62,17 @@ export default function GiftCard({ gift }: Props) {
         (e.currentTarget as HTMLDivElement).style.boxShadow = '0 2px 12px rgba(0,0,0,0.35)';
       }}
     >
-      {/* Product image header — only renders when we have a URL that loads.
-          White background + contain so dark product photos don't look weird on
-          the dark theme, and tall/wide products both display correctly. */}
+      {/* ── Image / shimmer header ─────────────────────────────────────── */}
+
+      {/* Shimmer skeleton while images are loading from /api/images */}
+      {imageLoading && (
+        <div
+          className="animate-pulse"
+          style={{ aspectRatio: '4 / 3', backgroundColor: '#1a1a24' }}
+        />
+      )}
+
+      {/* Product image — only shown when we have a URL that loads successfully */}
       {showImage && (
         <div
           className="flex items-center justify-center bg-white"
@@ -84,8 +91,8 @@ export default function GiftCard({ gift }: Props) {
 
       {/* Body */}
       <div className="flex flex-1 flex-col items-center p-6 text-center">
-        {/* Category emoji — only shown when no product image is available */}
-        {!showImage && (
+        {/* Category emoji — shown when no image (null or broken). Hidden while loading. */}
+        {!showImage && !imageLoading && (
           <div className="mb-4 text-5xl leading-none select-none">{gift.emoji || '🎁'}</div>
         )}
 

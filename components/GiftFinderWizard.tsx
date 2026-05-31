@@ -140,6 +140,45 @@ export default function GiftFinderWizard() {
     setStep(1);
   }
 
+  // ── Lazy image loader ──
+  // Called after themes are set. Fires /api/images in the background and
+  // patches imageUrls into the themes state when the response arrives.
+  // Cards render immediately with a shimmer skeleton; images pop in ~2-5s later.
+
+  async function loadImages(initialThemes: GiftTheme[]) {
+    const gifts = initialThemes.flatMap((t) =>
+      t.gifts.map((g) => ({ searchTerms: g.searchTerms })),
+    );
+    if (gifts.length === 0) return;
+
+    try {
+      const res = await fetch('/api/images', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ gifts }),
+      });
+      if (!res.ok) return;
+      const data = await res.json() as {
+        results: { searchTerms: string; imageUrl: string | null }[];
+      };
+      const imageMap = new Map(data.results.map((r) => [r.searchTerms, r.imageUrl]));
+
+      setThemes((prev) =>
+        prev.map((theme) => ({
+          ...theme,
+          gifts: theme.gifts.map((gift) => ({
+            ...gift,
+            imageUrl: imageMap.has(gift.searchTerms)
+              ? imageMap.get(gift.searchTerms)!
+              : gift.imageUrl,
+          })),
+        })),
+      );
+    } catch {
+      // Image loading failed silently — cards keep showing emoji fallback.
+    }
+  }
+
   // ── Initial search ──
 
   async function handleSubmit() {
@@ -157,6 +196,7 @@ export default function GiftFinderWizard() {
         setStep(6);
         return;
       }
+      // Render cards immediately — imageUrl is undefined on all gifts at this point.
       setThemes(data.themes);
       setPageSlug(data.pageSlug ?? null);
       setResultForm({ ...form });
@@ -167,6 +207,8 @@ export default function GiftFinderWizard() {
       setCommittedVibes(form.vibes ?? []);
       setCommittedRelatedness(form.relatedness);
       setStep('results');
+      // Fire image loading in the background — doesn't block card rendering.
+      loadImages(data.themes);
     } catch {
       setError('Network error. Please check your connection and try again.');
       setStep(6);
@@ -202,6 +244,8 @@ export default function GiftFinderWizard() {
       setCommittedPriceMax(resultForm.priceMax);
       setCommittedVibes(resultForm.vibes ?? []);
       setCommittedRelatedness(resultForm.relatedness);
+      // Lazy-load images for the refreshed results too.
+      loadImages(data.themes);
     } finally {
       setRefreshing(false);
     }

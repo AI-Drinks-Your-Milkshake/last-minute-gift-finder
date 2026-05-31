@@ -12,7 +12,8 @@
 //  - Failures degrade silently — the main Claude call still runs
 
 const BRAVE_WEB_ENDPOINT = 'https://api.search.brave.com/res/v1/web/search';
-const LOOKUP_TIMEOUT_MS = 3500;
+// Reduced from 3500 — trends feed into Claude so every ms here adds to TTFB.
+const LOOKUP_TIMEOUT_MS = 2000;
 const MAX_PRODUCTS = 10;
 
 interface BraveWebResult {

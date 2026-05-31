@@ -7,10 +7,12 @@ interface Props {
 }
 
 export default function GiftThemeSection({ theme, cols = 2 }: Props) {
-  // Filter out gifts where the server confirmed there's no valid image URL.
-  // This keeps the grid clean — every visible card will have a product photo.
-  // (Browser-side broken images are handled separately in GiftCard.)
-  const visibleGifts = theme.gifts.filter((g) => g.imageUrl != null);
+  // Show gifts where imageUrl is undefined (still loading) or a valid string.
+  // Only hide when imageUrl is explicitly null — meaning the lookup ran and
+  // found nothing. This lets cards render immediately with an emoji placeholder
+  // while images load asynchronously, rather than waiting for enrichment to
+  // complete before showing anything.
+  const visibleGifts = theme.gifts.filter((g) => g.imageUrl !== null);
   if (visibleGifts.length === 0) return null;
 
   const isDirect = theme.relatednessLevel === 1;
