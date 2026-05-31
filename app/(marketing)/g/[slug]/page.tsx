@@ -15,6 +15,7 @@
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { getPageResult } from '@/lib/page-results';
+import { enrichThemesWithImages } from '@/lib/product-images';
 import GiftThemeSection from '@/components/GiftThemeSection';
 
 interface Props {
@@ -50,6 +51,11 @@ const C = {
 export default async function GiftGuidePage({ params }: Props) {
   const page = await getPageResult(params.slug);
   if (!page) notFound();
+
+  // Enrich gifts with product images server-side. Uses KV cache so repeat
+  // visits are fast (cache hits only). First visit after a new search may
+  // take a few extra seconds while images are fetched and cached.
+  await enrichThemesWithImages(page.themes);
 
   const totalGifts = page.themes.reduce((acc, t) => acc + t.gifts.length, 0);
 
