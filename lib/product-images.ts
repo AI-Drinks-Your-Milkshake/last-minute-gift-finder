@@ -22,10 +22,11 @@ import type { GiftTheme } from '@/types';
  */
 
 const BRAVE_ENDPOINT = 'https://api.search.brave.com/res/v1/images/search';
-// Bumped to v2 to invalidate the pre-cutout-filter cache. Anything stored
-// under the old prefix was a "first accessible URL" pick, not a cutout —
-// keeping the old prefix would let those stale URLs bypass the new filter.
-const CACHE_PREFIX = 'gift_img_v2:';
+// Bumped to v4 alongside the larger Brave candidate pool (count 5→20) and
+// the "product white background" query hint. Old cache entries were
+// selected from a 5-candidate pool without the query hint, so they may
+// have returned null where the new pool finds a cutout. Re-evaluate.
+const CACHE_PREFIX = 'gift_img_v4:';
 // Reduced from 4000 — fail fast so a single bad search doesn't stall the pool.
 const LOOKUP_TIMEOUT_MS = 2500;
 // HEAD check timeout — shorter since we're only verifying a direct image URL.
@@ -34,23 +35,38 @@ const HEAD_TIMEOUT_MS = 1500;
 // pull the full image bytes, but still tight so one slow image doesn't stall
 // the whole concurrency pool.
 const DOWNLOAD_TIMEOUT_MS = 2500;
-// How many of Brave's top-ranked results we're willing to corner-sample
-// before giving up. Each one costs a download; 5 keeps the cold-cache
-// tail latency bounded.
-const MAX_CUTOUT_CANDIDATES = 5;
+// How many of Brave's ranked results we're willing to corner-sample before
+// giving up. Each one costs an image download (cached forever in KV after
+// first lookup, so this is paid once per unique searchTerms).
+//
+// Raised from 5 to 15 alongside the BRAVE_RESULT_COUNT bump from 5 to 20:
+// the larger candidate pool exists so we can dig past lifestyle/editorial
+// results at the top of Brave's rankings to find a genuine product cutout
+// further down. Short-circuits at the first match, so this is only the
+// worst-case cap when the top candidates all fail the white-background
+// check.
+const MAX_CUTOUT_CANDIDATES = 15;
+
+// How many image results to ask Brave for per query. Brave bills per
+// QUERY (not per result), so requesting 20 instead of 5 is free — we just
+// get more candidates back in the same response. More candidates = higher
+// odds of finding a cutout for product categories whose top-5 search
+// results skew toward lifestyle / editorial photography.
+const BRAVE_RESULT_COUNT = 20;
 // Corner-sample tuning. Each corner is an NxN region in raw RGB; we accept
 // the image only if every corner passes BOTH:
-//   - mean R, G, and B are all >= WHITE_MEAN_THRESHOLD (245)
+//   - mean R, G, and B are all >= WHITE_MEAN_THRESHOLD (250)
 //   - the minimum value of any single pixel's R, G, or B in the region is
-//     >= WHITE_MIN_THRESHOLD (225)
-// The mean check rules out uniform light-gray / beige backgrounds. The min
-// check catches "mostly white but with a colored intrusion" — e.g. a tiny
-// piece of the product or background bleeding into the corner of an
-// otherwise-white frame. Raised from 232 because at 232 we were letting
-// in lifestyle photos with light-colored backgrounds.
+//     >= WHITE_MIN_THRESHOLD (240)
+// The mean check rules out gray-sweep studio backgrounds (a typical Amazon
+// product shot on a soft gray backdrop sits around 246–249, which 245 was
+// letting through). The min check catches a single dark/colored pixel
+// intruding into an otherwise-white corner. 250 is about the strictest
+// practical mean — JPEG compression rarely renders pure white above 252,
+// so going higher starts rejecting legitimate cutouts.
 const SAMPLE_REGION         = 16;
-const WHITE_MEAN_THRESHOLD  = 245;
-const WHITE_MIN_THRESHOLD   = 225;
+const WHITE_MEAN_THRESHOLD  = 250;
+const WHITE_MIN_THRESHOLD   = 240;
 
 // Hosts whose images are usually low-signal: thumbnails, lifestyle shots,
 // listings with text overlays, or just frequently the wrong product.
@@ -121,7 +137,12 @@ async function fetchWithTimeout(
 }
 
 async function braveSearch(query: string): Promise<BraveImageResult[]> {
-  const url = `${BRAVE_ENDPOINT}?q=${encodeURIComponent(query)}&count=5&safesearch=strict`;
+  // Append a hint that biases Brave's ranker toward cutout product photos.
+  // Free win — costs nothing and lifts white-background results higher in
+  // the response, so we usually find a winner in the first 1–2 corner
+  // samples instead of digging through 8+ lifestyle shots.
+  const tunedQuery = `${query} product white background`;
+  const url = `${BRAVE_ENDPOINT}?q=${encodeURIComponent(tunedQuery)}&count=${BRAVE_RESULT_COUNT}&safesearch=strict`;
   const res = await fetchWithTimeout(
     url,
     {
