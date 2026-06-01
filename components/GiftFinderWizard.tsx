@@ -162,59 +162,35 @@ export default function GiftFinderWizard() {
     );
     if (gifts.length === 0) return;
 
+    devLog(`[images] fetching for ${gifts.length} gifts`);
     try {
       const res = await fetch('/api/images', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ gifts }),
       });
-      if (!res.ok || !res.body) return;
+      if (!res.ok) { devLog(`[images] response ${res.status}`); return; }
+      const data = await res.json() as {
+        results: { searchTerms: string; imageUrl: string | null }[];
+      };
+      const found  = data.results.filter((r) => r.imageUrl).length;
+      const nulls  = data.results.length - found;
+      devLog(`[images] done — ${found} found, ${nulls} null`);
 
-      const reader  = res.body.getReader();
-      const decoder = new TextDecoder();
-      let   buf     = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-
-        const parts = buf.split('\n\n');
-        buf = parts.pop() ?? '';
-
-        for (const part of parts) {
-          const dataLine = part.split('\n').find((l) => l.startsWith('data: '));
-          if (!dataLine) continue;
-          try {
-            const ev = JSON.parse(dataLine.slice(6)) as {
-              type: string;
-              msg?: string;
-              searchTerms?: string;
-              imageUrl?: string | null;
-            };
-
-            if (ev.type === 'log' && ev.msg) {
-              devLog(ev.msg);
-            }
-
-            if (ev.type === 'result' && ev.searchTerms !== undefined) {
-              const resolvedUrl = ev.imageUrl ?? null;
-              setThemes((prev) =>
-                prev.map((theme) => ({
-                  ...theme,
-                  gifts: theme.gifts.map((gift) =>
-                    gift.searchTerms === ev.searchTerms
-                      ? { ...gift, imageUrl: resolvedUrl }
-                      : gift,
-                  ),
-                })),
-              );
-            }
-          } catch { /* malformed event — skip */ }
-        }
-      }
-    } catch {
-      // Silently swallow — cards already show emoji fallback.
+      const imageMap = new Map(data.results.map((r) => [r.searchTerms, r.imageUrl]));
+      setThemes((prev) =>
+        prev.map((theme) => ({
+          ...theme,
+          gifts: theme.gifts.map((gift) => ({
+            ...gift,
+            imageUrl: imageMap.has(gift.searchTerms)
+              ? imageMap.get(gift.searchTerms)!
+              : gift.imageUrl,
+          })),
+        })),
+      );
+    } catch (err) {
+      devLog(`[images] error: ${err}`);
     }
   }
 
