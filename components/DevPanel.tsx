@@ -15,6 +15,11 @@ function appendLine(msg: string) {
   _listeners.forEach((fn) => fn());
 }
 
+export function clearDevLog() {
+  _lines.length = 0;
+  _listeners.forEach((fn) => fn());
+}
+
 function lineColor(line: string): string {
   if (line.includes('[KV hit]'))    return '#4ade80';
   if (line.includes('[KV miss]'))   return '#facc15';

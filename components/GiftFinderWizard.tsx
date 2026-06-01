@@ -8,7 +8,7 @@ declare global {
 import type { GiftTheme, SearchFormData } from '@/types';
 import GiftThemeSection from './GiftThemeSection';
 import PinPreview from './PinPreview';
-import DevPanel from './DevPanel';
+import DevPanel, { clearDevLog } from './DevPanel';
 import { RECIPIENT_GROUPS } from '@/lib/recipients';
 import { OCCASIONS } from '@/lib/occasions';
 import { AESTHETICS } from '@/lib/aesthetics';
@@ -147,6 +147,7 @@ export default function GiftFinderWizard() {
   }
 
   function resetSearch() {
+    clearDevLog();
     setForm(DEFAULT_FORM);
     setThemes([]);
     setError(null);
@@ -159,41 +160,74 @@ export default function GiftFinderWizard() {
   // Fires /api/images (SSE) after cards are already visible. Cards update
   // one-by-one as results stream in — no waiting for the full batch.
 
+  // ── Lazy image loader ──
+  // Reads the /api/images SSE stream. Each `result` event updates the
+  // matching gift card immediately so images appear card-by-card as they
+  // arrive, rather than waiting for the full batch.
   async function loadImages(initialThemes: GiftTheme[]) {
     const gifts = initialThemes.flatMap((t) =>
       t.gifts.map((g) => ({ searchTerms: g.searchTerms })),
     );
     if (gifts.length === 0) return;
 
-    devLog(`[images] fetching for ${gifts.length} gifts`);
     try {
       const res = await fetch('/api/images', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ gifts }),
       });
-      if (!res.ok) { devLog(`[images] response ${res.status}`); return; }
-      const data = await res.json() as {
-        results: { searchTerms: string; imageUrl: string | null }[];
-      };
-      const found  = data.results.filter((r) => r.imageUrl).length;
-      const nulls  = data.results.length - found;
-      devLog(`[images] done — ${found} found, ${nulls} null`);
+      if (!res.ok || !res.body) {
+        devLog(`[images] response ${res.status} — no body`);
+        return;
+      }
 
-      const imageMap = new Map(data.results.map((r) => [r.searchTerms, r.imageUrl]));
-      setThemes((prev) =>
-        prev.map((theme) => ({
-          ...theme,
-          gifts: theme.gifts.map((gift) => ({
-            ...gift,
-            imageUrl: imageMap.has(gift.searchTerms)
-              ? imageMap.get(gift.searchTerms)!
-              : gift.imageUrl,
-          })),
-        })),
-      );
+      const reader  = res.body.getReader();
+      const decoder = new TextDecoder();
+      let   buf     = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buf += decoder.decode(value, { stream: true });
+
+        // SSE events separated by '\n\n'
+        const parts = buf.split('\n\n');
+        buf = parts.pop() ?? '';
+
+        for (const part of parts) {
+          const dataLine = part.split('\n').find((l) => l.startsWith('data: '));
+          if (!dataLine) continue;
+          try {
+            const ev = JSON.parse(dataLine.slice(6)) as {
+              type: string;
+              msg?: string;
+              searchTerms?: string;
+              imageUrl?: string | null;
+            };
+
+            if (ev.type === 'log' && ev.msg) {
+              devLog(ev.msg);
+            }
+
+            if (ev.type === 'result' && ev.searchTerms !== undefined) {
+              const resolvedUrl = ev.imageUrl ?? null;
+              setThemes((prev) =>
+                prev.map((theme) => ({
+                  ...theme,
+                  gifts: theme.gifts.map((gift) =>
+                    gift.searchTerms === ev.searchTerms
+                      ? { ...gift, imageUrl: resolvedUrl }
+                      : gift,
+                  ),
+                })),
+              );
+            }
+          } catch { /* malformed SSE event — skip */ }
+        }
+      }
     } catch (err) {
-      devLog(`[images] error: ${err}`);
+      devLog(`[images] stream error: ${err}`);
     }
   }
 
@@ -253,11 +287,14 @@ export default function GiftFinderWizard() {
   // adds themes progressively as Claude generates them.
 
   async function handleSubmit() {
+    clearDevLog();
     devStart.current = Date.now();
     devLog(`[search] ${form.recipient} · ${form.age} · ${form.occasion}${form.interests ? ` · "${form.interests.slice(0, 40)}"` : ''}`);
     setStep('loading');
     setThemes([]);
     setError(null);
+    setPageSlug(null);
+    setPinImageUrl(null);
 
     let firstTheme = true;
     const allThemes: GiftTheme[] = [];

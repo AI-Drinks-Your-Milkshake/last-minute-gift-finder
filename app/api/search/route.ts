@@ -171,7 +171,11 @@ export async function POST(request: NextRequest) {
         const vibeLabel       = vibes?.[0] ? getAesthetic(vibes[0])?.label : undefined;
         const primaryInterest = extractPrimaryInterest(interests);
         const pageTitle       = buildPinTitle({ vibeLabel, occasion, recipientPlural, primaryInterest: primaryInterest ?? undefined });
-        const pageSlug        = buildSlug(pageTitle);
+        // Append a short base-36 timestamp so every search produces a unique
+        // slug and KV entry. Without this, re-running the same search overwrites
+        // the previous page result, causing the public page and pin image to
+        // show the new products while the wizard still shows the old ones.
+        const pageSlug        = `${buildSlug(pageTitle)}-${Date.now().toString(36)}`;
 
         const pinImageUrl = `/api/pin?slug=${encodeURIComponent(pageSlug)}${vibes?.[0] ? `&vibe=${encodeURIComponent(vibes[0])}` : ''}`;
         emit({ type: 'done', pageSlug, pinImageUrl });
