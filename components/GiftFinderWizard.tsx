@@ -1,9 +1,14 @@
 'use client';
 
 import { useState, useMemo, useRef } from 'react';
+
+declare global {
+  interface Window { __devLog?: (msg: string) => void; }
+}
 import type { GiftTheme, SearchFormData } from '@/types';
 import GiftThemeSection from './GiftThemeSection';
 import PinPreview from './PinPreview';
+import DevPanel from './DevPanel';
 import { RECIPIENT_GROUPS } from '@/lib/recipients';
 import { OCCASIONS } from '@/lib/occasions';
 import { AESTHETICS } from '@/lib/aesthetics';
@@ -91,6 +96,13 @@ export default function GiftFinderWizard() {
   const [committedRelatedness, setCommittedRelatedness] = useState<SearchFormData['relatedness']>('mixed');
   const [pageSlug,            setPageSlug]            = useState<string | null>(null);
 
+  // ── Dev log ──
+  const devStart = useRef<number>(Date.now());
+  function devLog(msg: string) {
+    const elapsed = ((Date.now() - devStart.current) / 1000).toFixed(1);
+    if (typeof window !== 'undefined') window.__devLog?.(`+${elapsed}s ${msg}`);
+  }
+
   // ── Display preferences (no re-fetch needed) ──
   const [gridCols, setGridCols] = useState(4);
   const [pinWidth, setPinWidth] = useState(340);
@@ -141,8 +153,8 @@ export default function GiftFinderWizard() {
   }
 
   // ── Lazy image loader ──
-  // Fires /api/images after cards are already visible. Images pop in
-  // progressively (shimmer → photo) without blocking initial render.
+  // Fires /api/images (SSE) after cards are already visible. Cards update
+  // one-by-one as results stream in — no waiting for the full batch.
 
   async function loadImages(initialThemes: GiftTheme[]) {
     const gifts = initialThemes.flatMap((t) =>
@@ -156,23 +168,51 @@ export default function GiftFinderWizard() {
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ gifts }),
       });
-      if (!res.ok) return;
-      const data = await res.json() as {
-        results: { searchTerms: string; imageUrl: string | null }[];
-      };
-      const imageMap = new Map(data.results.map((r) => [r.searchTerms, r.imageUrl]));
+      if (!res.ok || !res.body) return;
 
-      setThemes((prev) =>
-        prev.map((theme) => ({
-          ...theme,
-          gifts: theme.gifts.map((gift) => ({
-            ...gift,
-            imageUrl: imageMap.has(gift.searchTerms)
-              ? imageMap.get(gift.searchTerms)!
-              : gift.imageUrl,
-          })),
-        })),
-      );
+      const reader  = res.body.getReader();
+      const decoder = new TextDecoder();
+      let   buf     = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+
+        const parts = buf.split('\n\n');
+        buf = parts.pop() ?? '';
+
+        for (const part of parts) {
+          const dataLine = part.split('\n').find((l) => l.startsWith('data: '));
+          if (!dataLine) continue;
+          try {
+            const ev = JSON.parse(dataLine.slice(6)) as {
+              type: string;
+              msg?: string;
+              searchTerms?: string;
+              imageUrl?: string | null;
+            };
+
+            if (ev.type === 'log' && ev.msg) {
+              devLog(ev.msg);
+            }
+
+            if (ev.type === 'result' && ev.searchTerms !== undefined) {
+              const resolvedUrl = ev.imageUrl ?? null;
+              setThemes((prev) =>
+                prev.map((theme) => ({
+                  ...theme,
+                  gifts: theme.gifts.map((gift) =>
+                    gift.searchTerms === ev.searchTerms
+                      ? { ...gift, imageUrl: resolvedUrl }
+                      : gift,
+                  ),
+                })),
+              );
+            }
+          } catch { /* malformed event — skip */ }
+        }
+      }
     } catch {
       // Silently swallow — cards already show emoji fallback.
     }
@@ -217,7 +257,10 @@ export default function GiftFinderWizard() {
           const ev = JSON.parse(dataLine.slice(6)) as {
             type: string; theme?: GiftTheme; pageSlug?: string; message?: string;
           };
-          if (ev.type === 'theme' && ev.theme)    onTheme(ev.theme);
+          if (ev.type === 'theme' && ev.theme) {
+            devLog(`[SSE] theme: "${ev.theme.label}" (${ev.theme.gifts.length} gifts, level ${ev.theme.relatednessLevel})`);
+            onTheme(ev.theme);
+          }
           if (ev.type === 'done')                  onDone(ev.pageSlug ?? null);
           if (ev.type === 'error' && ev.message)   onError(ev.message);
         } catch { /* malformed event — skip */ }
@@ -230,6 +273,8 @@ export default function GiftFinderWizard() {
   // adds themes progressively as Claude generates them.
 
   async function handleSubmit() {
+    devStart.current = Date.now();
+    devLog(`[search] ${form.recipient} · ${form.age} · ${form.occasion}${form.interests ? ` · "${form.interests.slice(0, 40)}"` : ''}`);
     setStep('loading');
     setThemes([]);
     setError(null);
@@ -277,6 +322,8 @@ export default function GiftFinderWizard() {
   // ── Refresh (re-fetch with new depth/count from sidebar) ──
 
   async function handleRefresh() {
+    devStart.current = Date.now();
+    devLog(`[refresh] count=${resultForm.count} level=${resultForm.level} relatedness=${resultForm.relatedness}`);
     setRefreshing(true);
     const allThemes: GiftTheme[] = [];
 
@@ -1202,6 +1249,7 @@ export default function GiftFinderWizard() {
         ))}
       </div>
       <p style={{ fontSize: 13, color: C.textMuted }}>Finding the perfect gifts…</p>
+      <DevPanel />
     </div>
   );
 
@@ -1259,6 +1307,10 @@ export default function GiftFinderWizard() {
           Powered by Claude AI · Amazon links may include affiliate tags
         </p>
       </footer>
+
+      <div style={{ padding: '0 8px 40px' }}>
+        <DevPanel />
+      </div>
     </div>
   );
 
