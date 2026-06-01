@@ -39,10 +39,6 @@ export default function GiftCard({ gift }: Props) {
   // Track browser-side load failure separately from the server-side null.
   const [imageBroken, setImageBroken] = useState(false);
 
-  // Three image states:
-  //   undefined → still loading (show shimmer skeleton)
-  //   null      → no image found (show emoji)
-  //   string    → image URL ready (show image, fall back to emoji on load error)
   const imageLoading = gift.imageUrl === undefined;
   const showImage    = typeof gift.imageUrl === 'string' && !imageBroken;
 
@@ -91,11 +87,6 @@ export default function GiftCard({ gift }: Props) {
 
       {/* Body */}
       <div className="flex flex-1 flex-col items-center p-6 text-center">
-        {/* Category emoji — shown when no image (null or broken). Hidden while loading. */}
-        {!showImage && !imageLoading && (
-          <div className="mb-4 text-5xl leading-none select-none">{gift.emoji || '🎁'}</div>
-        )}
-
         {/* Title */}
         <h3
           className="mb-2 text-sm font-bold leading-snug"
@@ -104,7 +95,7 @@ export default function GiftCard({ gift }: Props) {
           {gift.title}
         </h3>
 
-        {/* Price + tier badge + category chip */}
+        {/* Price + tier badge */}
         <div className="mb-3 flex flex-wrap items-center justify-center gap-2">
           <span className="text-sm font-semibold" style={{ color: 'var(--text-soft)' }}>
             {gift.priceRange}
@@ -115,18 +106,6 @@ export default function GiftCard({ gift }: Props) {
           >
             {label}
           </span>
-          {gift.category && gift.category !== 'Other' && (
-            <span
-              className="rounded-full px-2.5 py-0.5 text-xs font-medium"
-              style={{
-                backgroundColor: 'var(--surface)',
-                color: 'var(--text-secondary)',
-                border: '1px solid var(--border)',
-              }}
-            >
-              {gift.category}
-            </span>
-          )}
         </div>
 
         {/* Description */}

@@ -1,21 +1,3 @@
-export type GiftCategory =
-  | 'Tech'
-  | 'Fashion'
-  | 'Beauty'
-  | 'Home'
-  | 'Outdoors'
-  | 'Food'
-  | 'Wellness'
-  | 'Experience'
-  | 'Snack'
-  | 'Stocking Stuffer'
-  | 'Other';
-
-export const GIFT_CATEGORIES: readonly GiftCategory[] = [
-  'Tech', 'Fashion', 'Beauty', 'Home', 'Outdoors',
-  'Food', 'Wellness', 'Experience', 'Snack', 'Stocking Stuffer', 'Other',
-];
-
 export interface GiftIdea {
   title: string;
   description: string;
@@ -23,8 +5,6 @@ export interface GiftIdea {
   priceMin: number;     // numeric lower bound for filtering
   priceMax: number;     // numeric upper bound for filtering
   searchTerms: string;
-  emoji: string;
-  category: GiftCategory; // what kind of object — for the per-card chip
   // Populated server-side after Claude returns, via Brave Image Search.
   // null = lookup ran but found nothing or failed; undefined = enrichment not yet run.
   imageUrl?: string | null;

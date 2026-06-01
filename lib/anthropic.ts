@@ -1,16 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { GiftTheme, GiftIdea, GiftCategory } from '@/types';
-import { GIFT_CATEGORIES } from '@/types';
+import type { GiftTheme, GiftIdea } from '@/types';
 import { aestheticPromptFragment } from './aesthetics';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-// Sonnet 4.6 — newer training cutoff (Aug 2025) and noticeably better
-// recommendation quality than Haiku 4.5. Freshness is still patched at request
-// time via `lib/trends.ts`, but the model swap closes part of the gap.
-const MODEL = 'claude-sonnet-4-6';
+const MODEL = 'claude-haiku-4-5-20251001';
 
 type Level = 'casual' | 'interested' | 'enthusiast';
 
@@ -118,9 +114,6 @@ function voiceOverlayFor(recipient: string): string {
 function isValidGift(g: unknown): g is GiftIdea {
   if (!g || typeof g !== 'object') return false;
   const x = g as Record<string, unknown>;
-  // Category is checked separately (and coerced) after validation so that
-  // a sensible-but-out-of-enum value like "Gaming" doesn't blow up the
-  // whole response. Here we only require the field to exist as a string.
   return (
     typeof x.title === 'string' && x.title.length > 0 &&
     typeof x.description === 'string' && x.description.length > 0 &&
@@ -128,16 +121,8 @@ function isValidGift(g: unknown): g is GiftIdea {
     typeof x.priceMin === 'number' && Number.isFinite(x.priceMin) &&
     typeof x.priceMax === 'number' && Number.isFinite(x.priceMax) &&
     (x.priceMax as number) >= (x.priceMin as number) &&
-    typeof x.searchTerms === 'string' && x.searchTerms.length > 0 &&
-    typeof x.emoji === 'string' && x.emoji.length > 0 &&
-    typeof x.category === 'string'
+    typeof x.searchTerms === 'string' && x.searchTerms.length > 0
   );
-}
-
-// Coerce any unknown category value to "Other" so the card just hides the
-// chip rather than the whole response failing validation.
-function coerceCategory(c: string): GiftCategory {
-  return (GIFT_CATEGORIES as readonly string[]).includes(c) ? (c as GiftCategory) : 'Other';
 }
 
 function isValidTheme(t: unknown): t is GiftTheme {
@@ -202,13 +187,11 @@ Return a JSON object with a "themes" key containing an array of EXACTLY 3 object
 - "relatednessLevel": 1 for theme 1, 2 for theme 2, 3 for theme 3
 - "gifts": array of gift objects, each with:
   - "title": specific product name (e.g. "Oura Ring Gen 3" not "fitness tracker", "Vitamix A3500" not "blender")
-  - "description": 1–2 sentences explaining why it fits this specific recipient. Start with what they'd actually do with it, in a single concrete sentence. Avoid the words "perfect", "thoughtful", or "loves".
+  - "description": exactly 1 sentence explaining what makes this specific gift right for this person. Start with what they'd do with it. Avoid "perfect", "thoughtful", "loves".
   - "priceRange": formatted as "$X–$Y"
   - "priceMin": lower bound as a NUMBER (no $ sign, no quotes, no commas)
   - "priceMax": upper bound as a NUMBER (no $ sign, no quotes, no commas)
   - "searchTerms": 3–6 words optimized for Amazon product search
-  - "emoji": single emoji for the gift category — choose the most fitting: 🎮 gaming, 📚 books, 🏃 fitness, 🎨 art/creative, 🍳 cooking, 🎵 music, 🌿 wellness, 🧳 travel, 💎 jewelry/luxury, 🔧 tech/tools, 🎭 entertainment, 👗 fashion, 🏠 home, 🍷 food/drink, 🧘 mindfulness, 🐾 pets, 🌱 outdoors, 🎲 games/fun
-  - "category": MUST be exactly one of these strings: ${GIFT_CATEGORIES.map((c) => `"${c}"`).join(', ')}
 
 Think like a thoughtful friend who knows this ${params.recipient} well. Pick gifts that feel curated and genuinely exciting, not safe or obvious. Avoid gift cards, generic flowers, or candles unless interests explicitly demand them.
 
@@ -270,16 +253,7 @@ Respond with ONLY the JSON object. Start your response with { and end with }. No
     throw new Error('One or more themes failed validation');
   }
 
-  // Coerce any out-of-enum category values to "Other" — done after validation
-  // because validation now allows any string for category.
-  const themes = themesRaw as GiftTheme[];
-  for (const t of themes) {
-    for (const g of t.gifts) {
-      g.category = coerceCategory(g.category);
-    }
-  }
-
-  return themes;
+  return themesRaw as GiftTheme[];
 }
 
 // ── Streaming variant ────────────────────────────────────────────────────────
@@ -340,13 +314,11 @@ Output EXACTLY 3 lines — one complete JSON object per line, no outer array or 
 - "relatednessLevel": 1 for theme 1, 2 for theme 2, 3 for theme 3
 - "gifts": array of gift objects, each with:
   - "title": specific product name (e.g. "Oura Ring Gen 3" not "fitness tracker", "Vitamix A3500" not "blender")
-  - "description": 1–2 sentences explaining why it fits this specific recipient. Start with what they'd actually do with it, in a single concrete sentence. Avoid the words "perfect", "thoughtful", or "loves".
+  - "description": exactly 1 sentence explaining what makes this specific gift right for this person. Start with what they'd do with it. Avoid "perfect", "thoughtful", "loves".
   - "priceRange": formatted as "$X–$Y"
   - "priceMin": lower bound as a NUMBER (no $ sign, no quotes, no commas)
   - "priceMax": upper bound as a NUMBER (no $ sign, no quotes, no commas)
   - "searchTerms": 3–6 words optimized for Amazon product search
-  - "emoji": single emoji for the gift category — choose the most fitting: 🎮 gaming, 📚 books, 🏃 fitness, 🎨 art/creative, 🍳 cooking, 🎵 music, 🌿 wellness, 🧳 travel, 💎 jewelry/luxury, 🔧 tech/tools, 🎭 entertainment, 👗 fashion, 🏠 home, 🍷 food/drink, 🧘 mindfulness, 🐾 pets, 🌱 outdoors, 🎲 games/fun
-  - "category": MUST be exactly one of these strings: ${GIFT_CATEGORIES.map((c) => `"${c}"`).join(', ')}
 
 Think like a thoughtful friend who knows this ${params.recipient} well. Pick gifts that feel curated and genuinely exciting, not safe or obvious. Avoid gift cards, generic flowers, or candles unless interests explicitly demand them.
 
@@ -378,9 +350,7 @@ Output only the 3 JSON lines. No other text, no markdown, no outer wrapper.`;
       if (!isValidTheme(parsed)) return null;
       if (yieldedIds.has((parsed as GiftTheme).id)) return null;
       yieldedIds.add((parsed as GiftTheme).id);
-      const theme = parsed as GiftTheme;
-      for (const g of theme.gifts) g.category = coerceCategory(g.category);
-      return theme;
+      return parsed as GiftTheme;
     } catch {
       return null;
     }
@@ -431,9 +401,7 @@ Output only the 3 JSON lines. No other text, no markdown, no outer wrapper.`;
           for (const t of themesRaw) {
             if (isValidTheme(t) && !yieldedIds.has((t as GiftTheme).id)) {
               yieldedIds.add((t as GiftTheme).id);
-              const theme = t as GiftTheme;
-              for (const g of theme.gifts) g.category = coerceCategory(g.category);
-              yield theme;
+              yield t as GiftTheme;
             }
           }
         }
