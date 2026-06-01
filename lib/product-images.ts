@@ -22,11 +22,13 @@ import type { GiftTheme } from '@/types';
  */
 
 const BRAVE_ENDPOINT = 'https://api.search.brave.com/res/v1/images/search';
-// Bumped to v4 alongside the larger Brave candidate pool (count 5→20) and
-// the "product white background" query hint. Old cache entries were
-// selected from a 5-candidate pool without the query hint, so they may
-// have returned null where the new pool finds a cutout. Re-evaluate.
-const CACHE_PREFIX = 'gift_img_v4:';
+// Bumped to v5 alongside the searchTerms-normalization change. v4 keys
+// used the raw lowercased searchTerms string; v5 keys use the normalized
+// form (see normalizeSearchTerms below) so cosmetic variations of the
+// same product name collapse to one cache entry. The two key formats
+// don't conflict, but v4 entries become unreachable — leaving them in
+// KV is harmless (small amount of wasted storage).
+const CACHE_PREFIX = 'gift_img_v5:';
 // Reduced from 4000 — fail fast so a single bad search doesn't stall the pool.
 const LOOKUP_TIMEOUT_MS = 2500;
 // HEAD check timeout — shorter since we're only verifying a direct image URL.
@@ -323,12 +325,62 @@ async function lookupImage(searchTerms: string): Promise<string | null> {
 }
 
 /**
+ * Canonicalize a searchTerms string for use as a KV cache key.
+ *
+ * Claude generates slightly different product names across runs even for
+ * identical products — "Stanley Quencher H2.0 30oz Tumbler" vs "Stanley
+ * 30oz Quencher Tumbler" vs "Stanley H2.0 Quencher 30 oz Tumbler". Each
+ * variation would otherwise hash to a different cache key and trigger a
+ * fresh Brave query for the same image.
+ *
+ * Normalization collapses cosmetic variations to a single canonical form:
+ *   1. Lowercase
+ *   2. Replace any non-alphanumeric run with a single space (kills
+ *      punctuation, hyphens, ampersands, etc. — "L.L.Bean" → "l l bean",
+ *      "WH-1000XM5" → "wh 1000xm5")
+ *   3. Tokenize on whitespace
+ *   4. Drop empty tokens and common stopwords (articles, prepositions,
+ *      generic connectors) — these add noise without changing identity
+ *   5. Sort alphabetically — word order shouldn't matter for cache hits
+ *   6. Join with single space
+ *
+ * Distinguishing tokens (sizes, colors, model numbers, version suffixes)
+ * are preserved deliberately — "iPhone 15" and "iPhone 16" must hash to
+ * different keys.
+ */
+const SEARCHTERMS_STOPWORDS = new Set([
+  'a', 'an', 'the',
+  'and', 'or',
+  'with', 'for', 'by', 'in', 'on', 'of', 'to', 'at', 'plus',
+]);
+
+export function normalizeSearchTerms(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length > 0 && !SEARCHTERMS_STOPWORDS.has(t))
+    .sort()
+    .join(' ');
+}
+
+/**
  * Fetch a product image URL for a single gift, using KV cache when available.
  * Returns null on any failure — callers should treat null as "no image".
+ *
+ * Important: the KV cache key uses the NORMALIZED searchTerms (see above),
+ * but the actual Brave search uses the original natural-language string.
+ * Brave's ranker benefits from natural phrasing; only the cache key needs
+ * to be canonical.
  */
 export async function getProductImage(searchTerms: string): Promise<string | null> {
   if (!braveConfigured()) return null;
-  const key = `${CACHE_PREFIX}${searchTerms.toLowerCase().trim()}`;
+  const normalized = normalizeSearchTerms(searchTerms);
+  // Defensive: an empty normalized string (e.g. searchTerms was just
+  // stopwords) shouldn't hash to a useful cache key — bail to a fresh
+  // Brave query without caching the result.
+  if (!normalized) return await lookupImage(searchTerms);
+  const key = `${CACHE_PREFIX}${normalized}`;
 
   if (kvConfigured()) {
     try {
