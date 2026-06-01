@@ -180,7 +180,8 @@ export async function POST(request: NextRequest) {
         // the client's perspective so these don't affect perceived latency.
         savePageResult(pageSlug, {
           title: pageTitle, recipient, recipientPlural, occasion, age,
-          vibeLabel, primaryInterest: primaryInterest ?? undefined,
+          vibeLabel, vibeSlug: vibes?.[0] ?? undefined,
+          primaryInterest: primaryInterest ?? undefined,
           themes, createdAt: Date.now(),
         }).catch((err) => console.error('[route] page-results write failed:', err));
 

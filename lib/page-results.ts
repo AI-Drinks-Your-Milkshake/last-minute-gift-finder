@@ -24,6 +24,8 @@ export interface StoredPageResult {
   age: string;
   /** Vibe label, e.g. "Outdoorsy" — absent when no vibe selected */
   vibeLabel?: string;
+  /** Vibe slug, e.g. "outdoorsy" — matches Aesthetic.value in lib/aesthetics.ts */
+  vibeSlug?: string;
   /** Extracted from interests field, e.g. "Camping" */
   primaryInterest?: string;
   /** Full themed gift results */
