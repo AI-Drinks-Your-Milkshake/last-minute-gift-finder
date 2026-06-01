@@ -6,7 +6,7 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-const MODEL = 'claude-sonnet-4-6'; // TODO: try 'claude-haiku-4-5-20251001' once confirmed available
+const MODEL = 'claude-haiku-4-5-20251001';
 
 type Level = 'casual' | 'interested' | 'enthusiast';
 
