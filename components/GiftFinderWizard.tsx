@@ -95,6 +95,7 @@ export default function GiftFinderWizard() {
   const [committedVibes,      setCommittedVibes]      = useState<string[]>([]);
   const [committedRelatedness, setCommittedRelatedness] = useState<SearchFormData['relatedness']>('mixed');
   const [pageSlug,            setPageSlug]            = useState<string | null>(null);
+  const [pinImageUrl,         setPinImageUrl]         = useState<string | null>(null);
 
   // ── Dev log ──
   const devStart = useRef<number>(Date.now());
@@ -149,6 +150,8 @@ export default function GiftFinderWizard() {
     setForm(DEFAULT_FORM);
     setThemes([]);
     setError(null);
+    setPageSlug(null);
+    setPinImageUrl(null);
     setStep(1);
   }
 
@@ -201,7 +204,7 @@ export default function GiftFinderWizard() {
   async function consumeSearchStream(
     body:    object,
     onTheme: (theme: GiftTheme) => void,
-    onDone:  (slug: string | null) => void,
+    onDone:  (slug: string | null, pinImageUrl: string | null) => void,
     onError: (msg: string) => void,
   ): Promise<void> {
     const res = await fetch('/api/search', {
@@ -231,13 +234,13 @@ export default function GiftFinderWizard() {
         if (!dataLine) continue;
         try {
           const ev = JSON.parse(dataLine.slice(6)) as {
-            type: string; theme?: GiftTheme; pageSlug?: string; message?: string;
+            type: string; theme?: GiftTheme; pageSlug?: string; pinImageUrl?: string; message?: string;
           };
           if (ev.type === 'theme' && ev.theme) {
             devLog(`[SSE] theme: "${ev.theme.label}" (${ev.theme.gifts.length} gifts, level ${ev.theme.relatednessLevel})`);
             onTheme(ev.theme);
           }
-          if (ev.type === 'done')                  onDone(ev.pageSlug ?? null);
+          if (ev.type === 'done')                  onDone(ev.pageSlug ?? null, ev.pinImageUrl ?? null);
           if (ev.type === 'error' && ev.message)   onError(ev.message);
         } catch { /* malformed event — skip */ }
       }
@@ -276,7 +279,7 @@ export default function GiftFinderWizard() {
             setStep('results');           // ← cards visible after first theme
           }
         },
-        (slug) => setPageSlug(slug),
+        (slug, pinUrl) => { setPageSlug(slug); if (pinUrl) setPinImageUrl(pinUrl); },
         (msg)  => {
           setError(msg);
           if (firstTheme) setStep(6);    // only go back if nothing was shown
@@ -317,7 +320,7 @@ export default function GiftFinderWizard() {
       await consumeSearchStream(
         apiBody,
         (theme) => { allThemes.push(theme); },
-        (slug)  => { if (slug) setPageSlug(slug); },
+        (slug, pinUrl) => { if (slug) setPageSlug(slug); if (pinUrl) setPinImageUrl(pinUrl); },
         ()      => { /* refresh errors are silent */ },
       );
 
@@ -923,6 +926,66 @@ export default function GiftFinderWizard() {
             ) : (
               <p style={{ fontSize: 11, color: C.textMuted }}>
                 {refreshing ? 'Refreshing…' : 'Saving page…'}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* ── PIN IMAGE URL ───────────────────────────────────────────── */}
+        {visibleThemes.length > 0 && (
+          <div style={{ marginTop: 20, paddingTop: 20, borderTop: `1px solid #16161e` }}>
+            <p style={{
+              fontSize: 10, color: C.textMuted, letterSpacing: '0.08em',
+              textTransform: 'uppercase', marginBottom: 8, fontWeight: 600,
+            }}>
+              Pin image URL
+            </p>
+            <p style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.5, marginBottom: 12 }}>
+              1000×1500px — ready to post to Pinterest.
+            </p>
+            {pinImageUrl ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <a
+                  href={pinImageUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    width: '100%', background: C.surface, color: C.textSec,
+                    border: `1px solid ${C.border}`, borderRadius: 10,
+                    padding: '10px 14px', fontSize: 12, fontWeight: 500,
+                    textDecoration: 'none', fontFamily: 'inherit',
+                    transition: 'border-color 0.15s, color 0.15s',
+                  }}
+                  onMouseEnter={e => {
+                    (e.currentTarget as HTMLAnchorElement).style.borderColor = C.accent;
+                    (e.currentTarget as HTMLAnchorElement).style.color = C.textPri;
+                  }}
+                  onMouseLeave={e => {
+                    (e.currentTarget as HTMLAnchorElement).style.borderColor = C.border;
+                    (e.currentTarget as HTMLAnchorElement).style.color = C.textSec;
+                  }}
+                >
+                  Open pin image
+                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2 10L10 2M10 2H4.5M10 2V7.5" />
+                  </svg>
+                </a>
+                <button
+                  onClick={() => navigator.clipboard.writeText(`${window.location.origin}${pinImageUrl}`)}
+                  style={{
+                    width: '100%', background: 'none', color: C.textMuted,
+                    border: `1px solid ${C.border}`, borderRadius: 10,
+                    padding: '8px 14px', fontSize: 11, cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  Copy URL
+                </button>
+              </div>
+            ) : (
+              <p style={{ fontSize: 11, color: C.textMuted }}>
+                {refreshing ? 'Refreshing…' : 'Generating…'}
               </p>
             )}
           </div>

@@ -172,7 +172,8 @@ export async function POST(request: NextRequest) {
         const pageTitle       = buildPinTitle({ vibeLabel, occasion, recipientPlural, primaryInterest: primaryInterest ?? undefined });
         const pageSlug        = buildSlug(pageTitle);
 
-        emit({ type: 'done', pageSlug });
+        const pinImageUrl = `/api/pin?slug=${encodeURIComponent(pageSlug)}${vibes?.[0] ? `&vibe=${encodeURIComponent(vibes[0])}` : ''}`;
+        emit({ type: 'done', pageSlug, pinImageUrl });
 
         // Fire-and-forget background writes — the stream is already closed from
         // the client's perspective so these don't affect perceived latency.
