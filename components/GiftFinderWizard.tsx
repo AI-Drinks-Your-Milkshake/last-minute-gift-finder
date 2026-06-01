@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 
 declare global {
   interface Window { __devLog?: (msg: string) => void; }
@@ -12,6 +12,7 @@ import DevPanel, { clearDevLog } from './DevPanel';
 import { RECIPIENT_GROUPS } from '@/lib/recipients';
 import { OCCASIONS } from '@/lib/occasions';
 import { AESTHETICS } from '@/lib/aesthetics';
+import { selectThemesForDisplay, countGifts, flattenGifts } from '@/lib/select-gifts';
 
 const LEVELS: Array<{ value: SearchFormData['level']; label: string; desc: string }> = [
   { value: 'casual',     label: 'Casual',     desc: 'Dabbles occasionally, not obsessive' },
@@ -407,27 +408,62 @@ export default function GiftFinderWizard() {
   const visibleThemes = useMemo<GiftTheme[]>(() => {
     const { relatedness, priceMin, priceMax } = resultForm;
 
-    const filtered = themes
-      .filter(t => {
-        if (relatedness === 'similar') return t.relatednessLevel === 1;
-        if (relatedness === 'mixed')   return t.relatednessLevel <= 2;
-        return true;
-      })
+    // Apply the live price refinement first (gift-level), then hand off to the
+    // shared selection used by EVERY surface. `strict: false` lets gifts whose
+    // image is still loading render as shimmer cards immediately; as images
+    // resolve, imageless gifts drop out and the count converges to exactly N.
+    const priceFiltered = themes
       .map(t => ({
         ...t,
         gifts: t.gifts.filter(g => g.priceMin <= priceMax && g.priceMax >= priceMin),
       }))
       .filter(t => t.gifts.length > 0);
 
-    // Hard-cap to exactly what the user requested. The route sends a 15% buffer
-    // to Claude internally; we truncate here so the visible count always matches.
-    let remaining = committedCount;
-    return filtered.map(theme => {
-      const gifts = theme.gifts.slice(0, remaining);
-      remaining = Math.max(0, remaining - theme.gifts.length);
-      return { ...theme, gifts };
-    }).filter(t => t.gifts.length > 0);
+    return selectThemesForDisplay(priceFiltered, relatedness, committedCount, { strict: false });
   }, [themes, resultForm, committedCount]);
+
+  // ── Published-count dev logs (all four surfaces) ──────────────────────────
+  // Once every image has resolved (no more `undefined`), record exactly what
+  // each surface publishes. The public page and pin image are computed with
+  // the identical shared selection on the full theme set, so the client can
+  // report their counts accurately without a server round-trip.
+  const imagesPending = useMemo(
+    () => themes.some(t => t.gifts.some(g => g.imageUrl === undefined)),
+    [themes],
+  );
+  // Strict selection on the FULL theme set = exactly what the server-rendered
+  // public page and pin image will show (they use committed, not live, values).
+  const publishedThemes = useMemo(
+    () => selectThemesForDisplay(themes, committedRelatedness, committedCount, { strict: true }),
+    [themes, committedRelatedness, committedCount],
+  );
+  const lastLoggedRef = useRef<string>('');
+  useEffect(() => {
+    if (step !== 'results' || refreshing) return;
+    if (themes.length === 0 || imagesPending) return;
+
+    const searchCount   = countGifts(visibleThemes);
+    const pinPreview     = flattenGifts(visibleThemes).filter(g => typeof g.imageUrl === 'string').slice(0, 30);
+    const pinPreviewCount = pinPreview.length;
+    const pageCount      = countGifts(publishedThemes);
+    const pinImageCount  = Math.min(30, pageCount);
+
+    const sig = `${searchCount}|${pinPreviewCount}|${pageCount}|${pinImageCount}`;
+    if (lastLoggedRef.current === sig) return;
+    lastLoggedRef.current = sig;
+
+    devLog(`[surface] search results: ${searchCount} gifts`);
+    devLog(`[surface] pin preview: ${pinPreviewCount} products`);
+    devLog(`[surface] public page: ${pageCount} gifts`);
+    devLog(`[surface] pin image: ${pinImageCount} products`);
+
+    // Shortfall is an error — oversampling is supposed to prevent it. Surface
+    // it loudly so we can measure how often it actually happens.
+    if (searchCount < committedCount) {
+      devLog(`[surface] ⚠ ERROR shortfall: ${searchCount}/${committedCount} gifts have images — increase oversampling`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, refreshing, imagesPending, visibleThemes, publishedThemes, committedCount]);
 
   // ── Step metadata ──
 

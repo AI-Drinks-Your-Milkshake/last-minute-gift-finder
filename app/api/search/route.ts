@@ -186,7 +186,9 @@ export async function POST(request: NextRequest) {
           title: pageTitle, recipient, recipientPlural, occasion, age,
           vibeLabel, vibeSlug: vibes?.[0] ?? undefined,
           primaryInterest: primaryInterest ?? undefined,
-          themes, createdAt: Date.now(),
+          // Persist the exact-N contract + relatedness so the public page and
+          // pin image apply the same selection the wizard grid does.
+          themes, count, relatedness, createdAt: Date.now(),
         }).catch((err) => console.error('[route] page-results write failed:', err));
 
         addRecentSearch({ recipient, occasion, timestamp: Date.now() })

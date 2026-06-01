@@ -16,6 +16,7 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { getPageResult } from '@/lib/page-results';
 import { enrichThemesWithImages } from '@/lib/product-images';
+import { selectThemesForDisplay, countGifts } from '@/lib/select-gifts';
 import GiftThemeSection from '@/components/GiftThemeSection';
 
 interface Props {
@@ -57,7 +58,23 @@ export default async function GiftGuidePage({ params }: Props) {
   // take a few extra seconds while images are fetched and cached.
   await enrichThemesWithImages(page.themes);
 
-  const totalGifts = page.themes.reduce((acc, t) => acc + t.gifts.filter(g => g.imageUrl !== null).length, 0);
+  // Apply the SAME selection the wizard grid uses, so this page shows exactly
+  // the same gifts in the same count. Falls back to "show everything" for
+  // pages stored before count/relatedness were persisted.
+  const selectedThemes = selectThemesForDisplay(
+    page.themes,
+    page.relatedness ?? 'adventurous',
+    page.count ?? countGifts(page.themes),
+    { strict: true },
+  );
+  const totalGifts = countGifts(selectedThemes);
+
+  // Server-side observability (STRIX_RULES #6): record what this surface
+  // actually published.
+  console.log(`[g/${params.slug}] published ${totalGifts} gifts (requested ${page.count ?? 'n/a'})`);
+  if (page.count !== undefined && totalGifts < page.count) {
+    console.error(`[g/${params.slug}] SHORTFALL: ${totalGifts}/${page.count} gifts have images`);
+  }
 
   return (
     <div
@@ -146,9 +163,9 @@ export default async function GiftGuidePage({ params }: Props) {
           </p>
         </div>
 
-        {/* Gift results — same component used in the app */}
+        {/* Gift results — same component + same selection as the app grid */}
         <div>
-          {page.themes.map((theme) => (
+          {selectedThemes.map((theme) => (
             <GiftThemeSection key={theme.id} theme={theme} cols={4} />
           ))}
         </div>

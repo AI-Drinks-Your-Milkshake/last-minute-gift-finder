@@ -9,6 +9,7 @@
 import { notFound } from 'next/navigation';
 import { getPageResult } from '@/lib/page-results';
 import { enrichThemesWithImages } from '@/lib/product-images';
+import { selectThemesForDisplay, flattenGifts, countGifts } from '@/lib/select-gifts';
 import PinTemplate from '@/components/PinTemplate';
 import type { PinProduct } from '@/types';
 
@@ -26,15 +27,26 @@ export default async function PinRenderPage({ params }: Props) {
   // Enrich with product images (cached in KV so repeat visits are fast).
   await enrichThemesWithImages(page.themes);
 
-  const products: PinProduct[] = page.themes
-    .flatMap((t) =>
-      t.gifts.map((g) => ({
-        title:      g.title,
-        priceRange: g.priceRange,
-        imageUrl:   typeof g.imageUrl === 'string' ? g.imageUrl : null,
-      })),
-    )
-    .slice(0, 30);
+  // Same selection as the wizard grid + public page, so the pin shows exactly
+  // the same gifts in the same count. (strict: images are already resolved.)
+  const selectedThemes = selectThemesForDisplay(
+    page.themes,
+    page.relatedness ?? 'adventurous',
+    page.count ?? countGifts(page.themes),
+    { strict: true },
+  );
+
+  const products: PinProduct[] = flattenGifts(selectedThemes).map((g) => ({
+    title:      g.title,
+    priceRange: g.priceRange,
+    imageUrl:   typeof g.imageUrl === 'string' ? g.imageUrl : null,
+  }));
+
+  // Server-side observability (STRIX_RULES #6).
+  console.log(`[pin-render/${params.slug}] published ${products.length} products (requested ${page.count ?? 'n/a'})`);
+  if (page.count !== undefined && products.length < page.count) {
+    console.error(`[pin-render/${params.slug}] SHORTFALL: ${products.length}/${page.count} products have images`);
+  }
 
   return (
     <>

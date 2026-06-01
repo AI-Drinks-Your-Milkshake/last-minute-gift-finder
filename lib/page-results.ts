@@ -30,6 +30,13 @@ export interface StoredPageResult {
   primaryInterest?: string;
   /** Full themed gift results */
   themes: GiftTheme[];
+  /** Number of gifts the user requested — the exact-N contract every surface
+   *  must honor. Optional for back-compat with pages stored before this field
+   *  existed (those fall back to showing everything). */
+  count?: number;
+  /** How adventurous the search was — bounds which themes are eligible when
+   *  selecting the visible gifts. Optional for back-compat. */
+  relatedness?: 'similar' | 'mixed' | 'adventurous';
   /** Unix ms timestamp */
   createdAt: number;
 }
