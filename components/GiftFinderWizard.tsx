@@ -1097,6 +1097,7 @@ export default function GiftFinderWizard() {
                 <button
                   key={r}
                   onClick={() => update('recipient', r)}
+                  onDoubleClick={() => { update('recipient', r); setStep(2); }}
                   style={chipStyle(form.recipient === r)}
                 >
                   {r}
@@ -1125,6 +1126,7 @@ export default function GiftFinderWizard() {
       <input
         type="text" placeholder="42" value={form.age}
         onChange={e => update('age', e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (form.age.trim()) setStep(3); } }}
         autoFocus className="dark-input"
         style={{
           background: C.surface, border: `1px solid ${C.border}`, color: C.textPri,
@@ -1151,7 +1153,7 @@ export default function GiftFinderWizard() {
       <p style={{ fontSize: 15, color: C.textSec, marginBottom: 28, lineHeight: 1.5 }}>Pick the one that fits best.</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 36 }}>
         {OCCASIONS.map(o => (
-          <button key={o} onClick={() => update('occasion', o)} style={chipStyle(form.occasion === o)}>{o}</button>
+          <button key={o} onClick={() => update('occasion', o)} onDoubleClick={() => { update('occasion', o); setStep(4); }} style={chipStyle(form.occasion === o)}>{o}</button>
         ))}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -1175,6 +1177,7 @@ export default function GiftFinderWizard() {
       <textarea
         placeholder="e.g. obsessed with cooking and craft beer, loves camping, recently got into woodworking…"
         value={form.interests} onChange={e => update('interests', e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); setStep(5); } }}
         rows={4} className="dark-textarea"
         style={{
           background: C.surface, border: `1px solid ${C.border}`, color: C.textPri,
@@ -1215,6 +1218,16 @@ export default function GiftFinderWizard() {
     }
   };
 
+  // Double-click: ensure this vibe is selected (a double-click fires two
+  // clicks first, which net-cancel the toggle), then advance to step 6.
+  const selectVibeAndContinue = (v: string) => {
+    const current = form.vibes ?? [];
+    if (!current.includes(v) && current.length < MAX_VIBES) {
+      update('vibes', [...current, v]);
+    }
+    setStep(6);
+  };
+
   const step5 = (
     <StepWrap>
       <p style={{ fontSize: 11, color: C.textMuted, letterSpacing: '0.05em', marginBottom: 12 }}>STEP 5 OF {TOTAL_STEPS}</p>
@@ -1235,6 +1248,7 @@ export default function GiftFinderWizard() {
             <button
               key={a.value}
               onClick={() => toggleVibe(a.value)}
+              onDoubleClick={() => selectVibeAndContinue(a.value)}
               disabled={atCap}
               style={{
                 ...chipStyle(selected),
