@@ -365,10 +365,8 @@ export default function GiftFinderWizard() {
 
   const visibleThemes = useMemo<GiftTheme[]>(() => {
     const { relatedness, priceMin, priceMax } = resultForm;
-    // No count truncation — the API already returns exactly the right number
-    // of gifts for the requested count + relatedness combination. Truncating
-    // here would silently under-deliver what the user asked for.
-    return themes
+
+    const filtered = themes
       .filter(t => {
         if (relatedness === 'similar') return t.relatednessLevel === 1;
         if (relatedness === 'mixed')   return t.relatednessLevel <= 2;
@@ -379,11 +377,19 @@ export default function GiftFinderWizard() {
         gifts: t.gifts.filter(g => g.priceMin <= priceMax && g.priceMax >= priceMin),
       }))
       .filter(t => t.gifts.length > 0);
-  }, [themes, resultForm]);
 
-  const totalVisible = visibleThemes.reduce((acc, t) => acc + t.gifts.length, 0);
+    // Hard-cap to exactly what the user requested. The route sends a 15% buffer
+    // to Claude internally; we truncate here so the visible count always matches.
+    let remaining = committedCount;
+    return filtered.map(theme => {
+      const gifts = theme.gifts.slice(0, remaining);
+      remaining = Math.max(0, remaining - theme.gifts.length);
+      return { ...theme, gifts };
+    }).filter(t => t.gifts.length > 0);
+  }, [themes, resultForm, committedCount]);
 
   // ── Step metadata ──
+
 
   const isWizardStep = typeof step === 'number' && step >= 1 && step <= TOTAL_STEPS;
   const wizardStep   = isWizardStep ? (step as number) : 0;
@@ -1236,7 +1242,7 @@ export default function GiftFinderWizard() {
       {/* Mobile filter strip */}
       <div className="lg:hidden" style={{ marginBottom: 20 }}>
         <p style={{ fontSize: 13, color: C.textPri, fontWeight: 500, marginBottom: 10 }}>
-          {totalVisible} ideas for {form.recipient}, {form.age} · {form.occasion}
+          Gift ideas for {form.recipient}, {form.age} · {form.occasion}
         </p>
         <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8, scrollbarWidth: 'none' }}>
           {VIBES.map(v => (
@@ -1262,7 +1268,7 @@ export default function GiftFinderWizard() {
         </h2>
         <span style={{ fontSize: 13, color: C.textMuted }}>{form.occasion} · {form.age}</span>
         <span style={{ fontSize: 12, color: C.textMuted, marginLeft: 'auto' }}>
-          {totalVisible} {totalVisible === 1 ? 'idea' : 'ideas'}
+          {committedCount} ideas
         </span>
       </div>
 

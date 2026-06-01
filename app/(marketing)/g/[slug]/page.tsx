@@ -57,7 +57,7 @@ export default async function GiftGuidePage({ params }: Props) {
   // take a few extra seconds while images are fetched and cached.
   await enrichThemesWithImages(page.themes);
 
-  const totalGifts = page.themes.reduce((acc, t) => acc + t.gifts.length, 0);
+  const totalGifts = page.themes.reduce((acc, t) => acc + t.gifts.filter(g => g.imageUrl !== null).length, 0);
 
   return (
     <div
