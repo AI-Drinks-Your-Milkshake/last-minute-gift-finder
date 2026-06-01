@@ -236,6 +236,7 @@ export default function GiftFinderWizard() {
           const ev = JSON.parse(dataLine.slice(6)) as {
             type: string; theme?: GiftTheme; pageSlug?: string; pinImageUrl?: string; message?: string;
           };
+          if (ev.type === 'log' && ev.message)     devLog(ev.message);
           if (ev.type === 'theme' && ev.theme) {
             devLog(`[SSE] theme: "${ev.theme.label}" (${ev.theme.gifts.length} gifts, level ${ev.theme.relatednessLevel})`);
             onTheme(ev.theme);

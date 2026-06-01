@@ -154,6 +154,7 @@ export async function POST(request: NextRequest) {
           level: level as Level,
           relatedness, vibes,
           trendingProducts,
+          onLog: (msg) => emit({ type: 'log', msg }),
         })) {
           themes.push(theme);
           emit({ type: 'theme', theme });

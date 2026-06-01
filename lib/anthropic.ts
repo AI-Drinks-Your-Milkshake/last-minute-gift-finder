@@ -30,6 +30,9 @@ interface GetGiftIdeasParams {
   // Used as in-context inspiration — Claude only recommends them if they
   // actually fit the recipient.
   trendingProducts?: string[];
+  // Optional dev-log callback — fires before the Anthropic call so observers
+  // can distinguish "waiting for Claude" from a silent failure.
+  onLog?: (msg: string) => void;
 }
 
 // Compute per-theme gift counts so the number of VISIBLE gifts (after
@@ -323,6 +326,8 @@ Output EXACTLY 3 lines — one complete JSON object per line, no outer array or 
 Think like a thoughtful friend who knows this ${params.recipient} well. Pick gifts that feel curated and genuinely exciting, not safe or obvious. Avoid gift cards, generic flowers, or candles unless interests explicitly demand them.
 
 Output only the 3 JSON lines. No other text, no markdown, no outer wrapper.`;
+
+  params.onLog?.(`[anthropic] calling Claude — ${totalCount} gifts across 3 themes (${t1Count}+${t2Count}+${t3Count})`);
 
   const stream = await anthropic.messages.create({
     model: MODEL,
