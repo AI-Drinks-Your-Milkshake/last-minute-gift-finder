@@ -13,7 +13,7 @@
 // and image mismatches.
 
 import { NextRequest } from 'next/server';
-import { getProductImage } from '@/lib/product-images';
+import { getProductImage, imageProvider } from '@/lib/product-images';
 
 // Image enrichment streams while it fans out Brave lookups + corner-sampling
 // (sharp), which can run 15-30s for 36 gifts. Same timeout exposure as the
@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
       const push = (obj: object) =>
         controller.enqueue(encoder.encode(sse(obj)));
 
-      push({ type: 'log', msg: `[images] fetching for ${gifts.length} gifts` });
+      push({ type: 'log', msg: `[images] fetching for ${gifts.length} gifts via ${imageProvider()}` });
 
       let found = 0;
       let nullCount = 0;

@@ -21,7 +21,8 @@ import type { GiftTheme } from '@/types';
  * missing KV — every path returns null rather than throwing.
  */
 
-const BRAVE_ENDPOINT = 'https://api.search.brave.com/res/v1/images/search';
+const BRAVE_ENDPOINT  = 'https://api.search.brave.com/res/v1/images/search';
+const SERPER_ENDPOINT = 'https://google.serper.dev/images';
 // Bumped to v5 alongside the searchTerms-normalization change. v4 keys
 // used the raw lowercased searchTerms string; v5 keys use the normalized
 // form (see normalizeSearchTerms below) so cosmetic variations of the
@@ -102,16 +103,47 @@ interface BraveImageResponse {
   results?: BraveImageResult[];
 }
 
+interface SerperImage {
+  imageUrl?: string;
+  thumbnailUrl?: string;
+  link?: string;     // page the image lives on
+  source?: string;
+  domain?: string;
+}
+
+interface SerperImageResponse {
+  images?: SerperImage[];
+}
+
+// Provider-agnostic candidate the rest of the pipeline (scoring, HEAD-check,
+// corner-sample) operates on, regardless of which search API produced it.
+interface ImageCandidate {
+  imageUrl: string;  // direct image URL to verify + download
+  pageUrl:  string;  // page the image lives on — used for scoring/demotion
+}
+
+// Which image-search provider to use. Serper (Google Images) is ~5-15x cheaper
+// per query than Brave; Brave is kept as a drop-in fallback. Set
+// IMAGE_SEARCH_PROVIDER=brave to switch back if Serper ever degrades.
+type ImageProvider = 'serper' | 'brave';
+export function imageProvider(): ImageProvider {
+  return process.env.IMAGE_SEARCH_PROVIDER === 'brave' ? 'brave' : 'serper';
+}
+
 function braveConfigured(): boolean {
   return Boolean(process.env.BRAVE_API_KEY);
+}
+
+function serperConfigured(): boolean {
+  return Boolean(process.env.SERPER_API_KEY);
 }
 
 function kvConfigured(): boolean {
   return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
 }
 
-function scoreResult(r: BraveImageResult): number {
-  const pageUrl = (r.url || '').toLowerCase();
+function scoreResult(c: ImageCandidate): number {
+  const pageUrl = (c.pageUrl || '').toLowerCase();
   if (!pageUrl) return -100;
   let score = 0;
   for (const host of DEMOTED_HOSTS) {
@@ -138,11 +170,11 @@ async function fetchWithTimeout(
   }
 }
 
-async function braveSearch(query: string): Promise<BraveImageResult[]> {
-  // Append a hint that biases Brave's ranker toward cutout product photos.
-  // Free win — costs nothing and lifts white-background results higher in
-  // the response, so we usually find a winner in the first 1–2 corner
-  // samples instead of digging through 8+ lifestyle shots.
+// ── Providers ────────────────────────────────────────────────────────────────
+// Each returns a normalized ImageCandidate[]; both append the same cutout hint
+// ("product white background") so the ranker surfaces clean product shots first.
+
+async function braveSearch(query: string): Promise<ImageCandidate[]> {
   const tunedQuery = `${query} product white background`;
   const url = `${BRAVE_ENDPOINT}?q=${encodeURIComponent(tunedQuery)}&count=${BRAVE_RESULT_COUNT}&safesearch=strict`;
   const res = await fetchWithTimeout(
@@ -157,7 +189,49 @@ async function braveSearch(query: string): Promise<BraveImageResult[]> {
   );
   if (!res.ok) throw new Error(`Brave search returned ${res.status}`);
   const data = (await res.json()) as BraveImageResponse;
-  return Array.isArray(data.results) ? data.results : [];
+  const results = Array.isArray(data.results) ? data.results : [];
+  return results
+    .map((r) => ({
+      imageUrl: r.properties?.url ?? r.thumbnail?.src ?? '',
+      pageUrl:  r.url ?? '',
+    }))
+    .filter((c) => c.imageUrl);
+}
+
+async function serperSearch(query: string): Promise<ImageCandidate[]> {
+  const res = await fetchWithTimeout(
+    SERPER_ENDPOINT,
+    {
+      method: 'POST',
+      headers: {
+        'X-API-KEY':    process.env.SERPER_API_KEY as string,
+        'Content-Type': 'application/json',
+      },
+      // num is free to raise — Serper, like Brave, bills per query, not per result.
+      body: JSON.stringify({ q: `${query} product white background`, num: BRAVE_RESULT_COUNT }),
+    },
+    LOOKUP_TIMEOUT_MS,
+  );
+  if (!res.ok) throw new Error(`Serper search returned ${res.status}`);
+  const data = (await res.json()) as SerperImageResponse;
+  const images = Array.isArray(data.images) ? data.images : [];
+  return images
+    .map((im) => ({
+      imageUrl: im.imageUrl ?? im.thumbnailUrl ?? '',
+      pageUrl:  im.link ?? (im.domain ? `https://${im.domain}` : ''),
+    }))
+    .filter((c) => c.imageUrl);
+}
+
+// Dispatch to the configured provider, falling back to whichever has a key so a
+// missing key for the selected provider never silently kills enrichment.
+async function searchImages(query: string): Promise<ImageCandidate[]> {
+  const provider = imageProvider();
+  if (provider === 'serper' && serperConfigured()) return serperSearch(query);
+  if (provider === 'brave'  && braveConfigured())  return braveSearch(query);
+  if (serperConfigured()) return serperSearch(query);
+  if (braveConfigured())  return braveSearch(query);
+  return [];
 }
 
 /**
@@ -289,11 +363,11 @@ async function hasWhiteBackground(bytes: Buffer): Promise<boolean> {
 }
 
 async function lookupImage(searchTerms: string): Promise<string | null> {
-  let results: BraveImageResult[];
+  let results: ImageCandidate[];
   try {
-    results = await braveSearch(searchTerms);
+    results = await searchImages(searchTerms);
   } catch (err) {
-    console.error('[product-images] Brave search failed:', err);
+    console.error('[product-images] image search failed:', err);
     return null;
   }
   if (results.length === 0) return null;
@@ -309,7 +383,7 @@ async function lookupImage(searchTerms: string): Promise<string | null> {
   let checked = 0;
   for (const candidate of ranked) {
     if (checked >= MAX_CUTOUT_CANDIDATES) break;
-    const rawUrl = candidate.properties?.url ?? candidate.thumbnail?.src ?? null;
+    const rawUrl = candidate.imageUrl;
     if (!rawUrl) continue;
     checked++;
 
@@ -368,19 +442,20 @@ export function normalizeSearchTerms(raw: string): string {
  * Fetch a product image URL for a single gift, using KV cache when available.
  * Returns null on any failure — callers should treat null as "no image".
  *
- * Important: the KV cache key uses the NORMALIZED searchTerms (see above),
- * but the actual Brave search uses the original natural-language string.
- * Brave's ranker benefits from natural phrasing; only the cache key needs
- * to be canonical.
+ * Important: the KV cache key uses the NORMALIZED searchTerms (see above) and
+ * is namespaced by provider, so switching IMAGE_SEARCH_PROVIDER does a clean
+ * re-fetch (a Brave-found URL can't mask a Serper test, and vice versa). The
+ * actual search still uses the original natural-language string — the ranker
+ * benefits from natural phrasing; only the cache key needs to be canonical.
  */
 export async function getProductImage(searchTerms: string): Promise<string | null> {
-  if (!braveConfigured()) return null;
+  if (!serperConfigured() && !braveConfigured()) return null;
   const normalized = normalizeSearchTerms(searchTerms);
   // Defensive: an empty normalized string (e.g. searchTerms was just
   // stopwords) shouldn't hash to a useful cache key — bail to a fresh
-  // Brave query without caching the result.
+  // lookup without caching the result.
   if (!normalized) return await lookupImage(searchTerms);
-  const key = `${CACHE_PREFIX}${normalized}`;
+  const key = `${CACHE_PREFIX}${imageProvider()}:${normalized}`;
 
   if (kvConfigured()) {
     try {
