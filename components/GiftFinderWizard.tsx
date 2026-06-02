@@ -98,6 +98,17 @@ export default function GiftFinderWizard() {
   const [pageSlug,            setPageSlug]            = useState<string | null>(null);
   const [pinImageUrl,         setPinImageUrl]         = useState<string | null>(null);
 
+  // We run a single model (Haiku). If a stale ?model= param is in the URL
+  // (e.g. a saved tab from when the model toggle existed), strip it so the
+  // address bar stays clean — it has no effect anymore.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('model')) {
+      url.searchParams.delete('model');
+      window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+    }
+  }, []);
+
   // ── Dev log ──
   const devStart = useRef<number>(Date.now());
   function devLog(msg: string) {
@@ -242,21 +253,27 @@ export default function GiftFinderWizard() {
     onDone:  (slug: string | null, pinImageUrl: string | null) => void,
     onError: (msg: string) => void,
   ): Promise<void> {
+    const streamStart = Date.now();
     const res = await fetch('/api/search', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(body),
     });
 
+    devLog(`[stream] /api/search responded ${res.status}`);
     if (!res.body) { onError('No response body.'); return; }
 
     const reader  = res.body.getReader();
     const decoder = new TextDecoder();
     let   buf     = '';
+    let   themeCount = 0;
 
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        devLog(`[stream] closed after ${((Date.now() - streamStart) / 1000).toFixed(1)}s — ${themeCount} themes received`);
+        break;
+      }
 
       buf += decoder.decode(value, { stream: true });
 
@@ -269,10 +286,11 @@ export default function GiftFinderWizard() {
         if (!dataLine) continue;
         try {
           const ev = JSON.parse(dataLine.slice(6)) as {
-            type: string; theme?: GiftTheme; pageSlug?: string; pinImageUrl?: string; message?: string;
+            type: string; theme?: GiftTheme; pageSlug?: string; pinImageUrl?: string; message?: string; msg?: string;
           };
-          if (ev.type === 'log' && ev.message)     devLog(ev.message);
+          if (ev.type === 'log') { const m = ev.msg ?? ev.message; if (m) devLog(m); }
           if (ev.type === 'theme' && ev.theme) {
+            themeCount++;
             devLog(`[SSE] theme: "${ev.theme.label}" (${ev.theme.gifts.length} gifts, level ${ev.theme.relatednessLevel})`);
             onTheme(ev.theme);
           }
@@ -328,10 +346,12 @@ export default function GiftFinderWizard() {
       if (allThemes.length > 0) {
         loadImages(allThemes);
       } else if (firstTheme) {
+        devLog('[stream] connection closed before any theme arrived — see the [wait]/[anthropic] lines above for how far the model got');
         setError('Something went wrong. Please try again.');
         setStep(6);
       }
-    } catch {
+    } catch (err) {
+      devLog(`[stream] aborted: ${err instanceof Error ? err.message : String(err)}`);
       setError('Network error. Please check your connection and try again.');
       if (firstTheme) setStep(6);
     }
@@ -1362,6 +1382,21 @@ export default function GiftFinderWizard() {
           Find gift ideas
         </button>
       </div>
+
+      {/* On failure we land back here — keep the diagnostics visible so the
+          logs that explain WHY (timeout vs [error] vs 0 themes) don't vanish
+          with the loading screen. */}
+      {error && (
+        <div style={{ marginTop: 32 }}>
+          <p style={{
+            fontSize: 10, color: C.textMuted, letterSpacing: '0.08em',
+            textTransform: 'uppercase', fontWeight: 600, marginBottom: 4,
+          }}>
+            Diagnostics — what happened
+          </p>
+          <DevPanel />
+        </div>
+      )}
     </StepWrap>
   );
 

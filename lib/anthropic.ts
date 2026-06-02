@@ -1,12 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { GiftTheme, GiftIdea } from '@/types';
 import { aestheticPromptFragment } from './aesthetics';
+import { MODEL } from './models';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
-
-const MODEL = 'claude-sonnet-4-6';
 
 type Level = 'casual' | 'interested' | 'enthusiast';
 
@@ -30,6 +29,9 @@ interface GetGiftIdeasParams {
   // Used as in-context inspiration — Claude only recommends them if they
   // actually fit the recipient.
   trendingProducts?: string[];
+  // Optional per-request model override (full id, e.g. "claude-sonnet-4-6").
+  // Defaults to MODEL. The route only forwards this for owner/dev requests.
+  model?: string;
   // Optional dev-log callback — fires before the Anthropic call so observers
   // can distinguish "waiting for Claude" from a silent failure.
   onLog?: (msg: string) => void;
@@ -114,28 +116,66 @@ function voiceOverlayFor(recipient: string): string {
   return ''; // default: keep the base concierge voice
 }
 
-function isValidGift(g: unknown): g is GiftIdea {
-  if (!g || typeof g !== 'object') return false;
-  const x = g as Record<string, unknown>;
-  return (
-    typeof x.title === 'string' && x.title.length > 0 &&
-    typeof x.description === 'string' && x.description.length > 0 &&
-    typeof x.priceRange === 'string' && x.priceRange.length > 0 &&
-    typeof x.priceMin === 'number' && Number.isFinite(x.priceMin) &&
-    typeof x.priceMax === 'number' && Number.isFinite(x.priceMax) &&
-    (x.priceMax as number) >= (x.priceMin as number) &&
-    typeof x.searchTerms === 'string' && x.searchTerms.length > 0
-  );
+// Coerce a price-ish value to a finite number. Models under a loose JSON schema
+// (Haiku especially) often emit prices as strings ("$1,200", "50") instead of
+// raw numbers. The previous STRICT validator silently rejected those gifts —
+// which is exactly why production parsed 0 themes from Haiku while a lenient
+// benchmark "passed." We coerce instead of reject.
+function toNum(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string') {
+    const n = parseFloat(v.replace(/[$,\s]/g, ''));
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
 }
 
-function isValidTheme(t: unknown): t is GiftTheme {
-  if (!t || typeof t !== 'object') return false;
+// Normalize one gift into a valid GiftIdea, or null if it's truly unusable.
+function normalizeGift(g: unknown): GiftIdea | null {
+  if (!g || typeof g !== 'object') return null;
+  const x = g as Record<string, unknown>;
+  const title       = typeof x.title === 'string' ? x.title.trim() : '';
+  const description = typeof x.description === 'string' ? x.description.trim() : '';
+  const searchTerms =
+    typeof x.searchTerms === 'string' && x.searchTerms.trim() ? x.searchTerms.trim() : title;
+  if (!title || !description || !searchTerms) return null;
+
+  let min = toNum(x.priceMin);
+  let max = toNum(x.priceMax);
+  // Fall back to parsing the human "priceRange" ("$75–$300") when the numeric
+  // fields are missing or non-numeric.
+  if ((min === null || max === null) && typeof x.priceRange === 'string') {
+    const nums = x.priceRange.match(/\d[\d,]*\.?\d*/g);
+    if (nums?.[0] && min === null) min = parseFloat(nums[0].replace(/,/g, ''));
+    if (nums?.[1] && max === null) max = parseFloat(nums[1].replace(/,/g, ''));
+  }
+  if (min === null && max !== null) min = max;
+  if (max === null && min !== null) max = min;
+  if (min === null || max === null) return null;
+  if (max < min) [min, max] = [max, min];
+
+  const priceRange =
+    typeof x.priceRange === 'string' && x.priceRange.trim() ? x.priceRange.trim() : `$${min}–$${max}`;
+
+  return { title, description, priceRange, priceMin: min, priceMax: max, searchTerms };
+}
+
+// Normalize one theme into a valid GiftTheme, or null. Accepts a numeric-string
+// relatednessLevel and derives id/label leniently.
+function normalizeTheme(t: unknown): GiftTheme | null {
+  if (!t || typeof t !== 'object') return null;
   const x = t as Record<string, unknown>;
-  if (typeof x.id !== 'string' || x.id.length === 0) return false;
-  if (typeof x.label !== 'string' || x.label.length === 0) return false;
-  if (x.relatednessLevel !== 1 && x.relatednessLevel !== 2 && x.relatednessLevel !== 3) return false;
-  if (!Array.isArray(x.gifts) || x.gifts.length === 0) return false;
-  return x.gifts.every(isValidGift);
+  const id    = typeof x.id === 'string' && x.id.trim() ? x.id.trim() : '';
+  const label = typeof x.label === 'string' && x.label.trim() ? x.label.trim() : id;
+  let lvl: unknown = x.relatednessLevel;
+  if (typeof lvl === 'string') lvl = Number(lvl);
+  if (lvl !== 1 && lvl !== 2 && lvl !== 3) return null;
+  if (!Array.isArray(x.gifts)) return null;
+  const gifts = x.gifts.map(normalizeGift).filter((g): g is GiftIdea => g !== null);
+  if (gifts.length === 0) return null;
+  const finalId = id || label;
+  if (!finalId || !label) return null;
+  return { id: finalId, label, relatednessLevel: lvl as 1 | 2 | 3, gifts };
 }
 
 export async function getGiftIdeas(params: GetGiftIdeasParams): Promise<GiftTheme[]> {
@@ -201,7 +241,7 @@ Think like a thoughtful friend who knows this ${params.recipient} well. Pick gif
 Respond with ONLY the JSON object. Start your response with { and end with }. No prose, no markdown fences.`;
 
   const response = await anthropic.messages.create({
-    model: MODEL,
+    model: params.model ?? MODEL,
     // ~250 tokens/gift. With count=25 + mixed distribution the API generates
     // up to 27 gifts total (13+12+1). 8000 tokens gives comfortable headroom;
     // truncation would silently break JSON parsing downstream.
@@ -248,15 +288,18 @@ Respond with ONLY the JSON object. Start your response with { and end with }. No
   }
 
   const themesRaw = (parsed as { themes?: unknown }).themes;
-  if (!Array.isArray(themesRaw) || themesRaw.length !== 3) {
-    throw new Error('Anthropic response must contain exactly 3 themes');
+  if (!Array.isArray(themesRaw) || themesRaw.length === 0) {
+    throw new Error('Anthropic response contained no themes');
   }
 
-  if (!themesRaw.every(isValidTheme)) {
-    throw new Error('One or more themes failed validation');
+  const themes = themesRaw
+    .map(normalizeTheme)
+    .filter((t): t is GiftTheme => t !== null);
+  if (themes.length === 0) {
+    throw new Error('No valid themes in Anthropic response');
   }
 
-  return themesRaw as GiftTheme[];
+  return themes;
 }
 
 // ── Streaming variant ────────────────────────────────────────────────────────
@@ -327,92 +370,121 @@ Think like a thoughtful friend who knows this ${params.recipient} well. Pick gif
 
 Output only the 3 JSON lines. No other text, no markdown, no outer wrapper.`;
 
-  params.onLog?.(`[anthropic] calling Claude — ${totalCount} gifts across 3 themes (${t1Count}+${t2Count}+${t3Count})`);
+  params.onLog?.(
+    `[anthropic] key configured: ${Boolean(process.env.ANTHROPIC_API_KEY)} · model ${params.model ?? MODEL} · calling Claude — ${totalCount} gifts across 3 themes (${t1Count}+${t2Count}+${t3Count})`,
+  );
 
-  const stream = await anthropic.messages.create({
-    model: MODEL,
-    max_tokens: 8000,
-    temperature: 0.85,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: userPrompt }],
-    stream: true,
-  });
+  // maxRetries: 1 so a retryable failure (429/529/network) surfaces in ~1-2s
+  // instead of backing off until the platform kills the function silently.
+  let stream;
+  try {
+    stream = await anthropic.messages.create(
+      {
+        model: params.model ?? MODEL,
+        max_tokens: 8000,
+        temperature: 0.85,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        stream: true,
+      },
+      { maxRetries: 1 },
+    );
+  } catch (err) {
+    const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    params.onLog?.(`[anthropic] create() failed: ${detail}`);
+    console.error('[anthropic] create() failed:', err);
+    throw err;
+  }
+  params.onLog?.('[anthropic] stream opened — awaiting first token');
 
-  // Buffer text from the stream. Yield a theme whenever a complete JSON line
-  // lands (i.e. we see a '\n' after content that parses as a valid GiftTheme).
-  let lineBuffer = '';
-  let fullText   = '';
+  // ── Formatting-agnostic incremental JSON streaming ───────────────────────
+  // Yield each theme object the moment its braces balance, regardless of
+  // whitespace or newlines. The previous parser assumed exactly one compact
+  // JSON object per line — Sonnet happened to honor that, but Haiku (and any
+  // model under load) does not, which is what made Haiku "unreliable on NDJSON"
+  // and forced the Sonnet revert. Brace-depth scanning works for compact
+  // NDJSON, pretty-printed objects, AND a {themes:[...]} wrapper, so streaming
+  // no longer depends on the model's formatting.
   const yieldedIds = new Set<string>();
+  let buf      = '';     // all text received so far
+  let scan     = 0;      // resume index into buf
+  let depth    = 0;      // brace nesting depth
+  let inStr    = false;  // currently inside a JSON string literal
+  let esc      = false;  // previous char was a backslash (string escape)
+  let objStart = -1;     // index where the current top-level object began
 
-  function tryExtractTheme(text: string): GiftTheme | null {
-    const trimmed = text.trim();
-    if (!trimmed) return null;
-    const start = trimmed.indexOf('{');
-    const end   = trimmed.lastIndexOf('}');
-    if (start === -1 || end === -1 || end <= start) return null;
-    try {
-      const parsed = JSON.parse(trimmed.slice(start, end + 1));
-      if (!isValidTheme(parsed)) return null;
-      if (yieldedIds.has((parsed as GiftTheme).id)) return null;
-      yieldedIds.add((parsed as GiftTheme).id);
-      return parsed as GiftTheme;
-    } catch {
-      return null;
+  // Parse one complete top-level object slice. Accepts either a bare theme or
+  // a {themes:[...]} wrapper, returning any newly-seen valid themes.
+  function themesFrom(slice: string): GiftTheme[] {
+    let parsed: unknown;
+    try { parsed = JSON.parse(slice); } catch { return []; }
+    const out: GiftTheme[] = [];
+    const consider = (cand: unknown) => {
+      const theme = normalizeTheme(cand);
+      if (theme && !yieldedIds.has(theme.id)) {
+        yieldedIds.add(theme.id);
+        out.push(theme);
+      }
+    };
+    const wrapper = parsed as { themes?: unknown };
+    if (parsed && typeof parsed === 'object' && Array.isArray(wrapper.themes)) {
+      for (const t of wrapper.themes) consider(t);
+    } else {
+      consider(parsed);
     }
+    return out;
   }
 
-  for await (const chunk of stream) {
-    if (chunk.type !== 'content_block_delta') continue;
-    if (chunk.delta.type !== 'text_delta') continue;
-
-    const text = chunk.delta.text;
-    fullText   += text;
-    lineBuffer += text;
-
-    // Yield any complete lines (everything up to the last '\n').
-    const lastNl = lineBuffer.lastIndexOf('\n');
-    if (lastNl < 0) continue;
-
-    const completeLines = lineBuffer.slice(0, lastNl).split('\n');
-    lineBuffer = lineBuffer.slice(lastNl + 1);
-
-    for (const line of completeLines) {
-      const theme = tryExtractTheme(line);
-      if (theme) yield theme;
-    }
-  }
-
-  // Process the final partial line (no trailing '\n').
-  if (lineBuffer.trim()) {
-    const theme = tryExtractTheme(lineBuffer);
-    if (theme) yield theme;
-  }
-
-  // ── Fallback: Claude output the old {themes:[...]} format instead of NDJSON ──
-  // If we got fewer than 3 themes from line-by-line parsing, attempt to parse
-  // the full accumulated text as the standard JSON object format.
-  if (yieldedIds.size < 3) {
-    let raw = fullText.trim();
-    if (raw.startsWith('```')) {
-      raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-    }
-    const firstBrace = raw.indexOf('{');
-    const lastBrace  = raw.lastIndexOf('}');
-    if (firstBrace !== -1 && lastBrace > firstBrace) {
-      try {
-        const parsed = JSON.parse(raw.slice(firstBrace, lastBrace + 1));
-        const themesRaw = (parsed as { themes?: unknown }).themes;
-        if (Array.isArray(themesRaw)) {
-          for (const t of themesRaw) {
-            if (isValidTheme(t) && !yieldedIds.has((t as GiftTheme).id)) {
-              yieldedIds.add((t as GiftTheme).id);
-              yield t as GiftTheme;
-            }
-          }
+  // Scan newly-arrived text, emitting every top-level object that has closed.
+  function drainComplete(): GiftTheme[] {
+    const ready: GiftTheme[] = [];
+    for (; scan < buf.length; scan++) {
+      const ch = buf[scan];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (ch === '\\') esc = true;
+        else if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') { inStr = true; continue; }
+      if (ch === '{') { if (depth === 0) objStart = scan; depth++; }
+      else if (ch === '}') {
+        if (depth > 0) depth--;
+        if (depth === 0 && objStart >= 0) {
+          ready.push(...themesFrom(buf.slice(objStart, scan + 1)));
+          objStart = -1;
         }
-      } catch {
-        // Nothing we can do — the route will emit an error event.
       }
     }
+    return ready;
+  }
+
+  let chunkCount = 0;
+  let sawText = false;
+  for await (const chunk of stream) {
+    chunkCount++;
+    // Log the first few raw chunk types so we can see exactly what the model
+    // emits on Vercel (text vs thinking vs ping vs nothing) when diagnosing.
+    if (chunkCount <= 6) {
+      const sub = chunk.type === 'content_block_delta' ? `/${chunk.delta.type}` : '';
+      params.onLog?.(`[anthropic] chunk ${chunkCount}: ${chunk.type}${sub}`);
+    }
+    if (chunk.type !== 'content_block_delta') continue;
+    if (chunk.delta.type !== 'text_delta') continue;
+    if (!sawText) {
+      sawText = true;
+      params.onLog?.('[anthropic] first text token received');
+    }
+    buf += chunk.delta.text;
+    for (const theme of drainComplete()) yield theme;
+  }
+
+  // Final drain for an object that closed in the very last chunk.
+  for (const theme of drainComplete()) yield theme;
+
+  // Safety net: if nothing parsed, surface a sample of the raw model output so
+  // we can see exactly what shape defeated the parser (rather than guessing).
+  if (yieldedIds.size === 0) {
+    params.onLog?.(`[anthropic] 0 themes parsed — raw sample: ${buf.slice(0, 400).replace(/\s+/g, ' ').trim()}`);
   }
 }

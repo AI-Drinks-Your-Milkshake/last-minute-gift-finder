@@ -15,6 +15,13 @@
 import { NextRequest } from 'next/server';
 import { getProductImage } from '@/lib/product-images';
 
+// Image enrichment streams while it fans out Brave lookups + corner-sampling
+// (sharp), which can run 15-30s for 36 gifts. Same timeout exposure as the
+// search route — pin it so the function isn't killed mid-stream.
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
 const MAX_GIFTS   = 50;
 const CONCURRENCY = 8;
 

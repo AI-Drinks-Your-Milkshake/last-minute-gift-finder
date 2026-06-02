@@ -10,10 +10,18 @@ import {
   buildSlug,
 } from '@/lib/pin-title';
 import { savePageResult } from '@/lib/page-results';
+import { MODEL } from '@/lib/models';
 import type { GiftTheme } from '@/types';
 
 // Ensure Next.js never statically optimises this route.
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+// A gift search streams for ~12-50s. Without this, the function inherits
+// Vercel's short default timeout (~10-15s) and gets KILLED mid-stream before
+// the first theme arrives — which surfaces as "Something went wrong" with no
+// server error logged (a kill is not a catchable exception). 60s is the Hobby
+// ceiling and ample for Haiku; raise to 300 on Pro if running Sonnet at count=30.
+export const maxDuration = 60;
 
 const COUNT_MIN = 3;
 const COUNT_MAX = 30;
@@ -128,8 +136,24 @@ export async function POST(request: NextRequest) {
 
   const readableStream = new ReadableStream({
     async start(controller) {
-      const emit = (obj: object) =>
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+      // Guard every controller op: once the client disconnects (or the stream
+      // closes), the controller is torn down and enqueue/close throw
+      // ERR_INVALID_STATE ("failed to pipe response"). Track closed state and
+      // no-op instead, so a disconnect can't crash the handler.
+      let closed = false;
+      const emit = (obj: object) => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+        } catch {
+          closed = true;
+        }
+      };
+      const safeClose = () => {
+        if (closed) return;
+        closed = true;
+        try { controller.close(); } catch { /* already torn down */ }
+      };
 
       try {
         // Cap trending wait at 2 s so Claude isn't delayed longer.
@@ -145,24 +169,52 @@ export async function POST(request: NextRequest) {
 
         const themes: GiftTheme[] = [];
 
+        emit({ type: 'log', msg: `[model] haiku (${MODEL})` });
+
+        // Heartbeat: emit a keep-alive log every 2s until the first theme
+        // arrives. The first theme can take 3-12s to generate, during which we
+        // otherwise send NO bytes to the client — and an idle streaming
+        // response gets closed by the platform/proxy. These periodic events
+        // keep the pipe active, and also reveal in the panel exactly how long
+        // the wait actually is.
+        const genStart = Date.now();
+        let firstThemeAt = 0;
+        const heartbeat = setInterval(() => {
+          if (firstThemeAt) return;
+          try {
+            emit({ type: 'log', msg: `[wait] awaiting first theme — ${((Date.now() - genStart) / 1000).toFixed(0)}s` });
+          } catch { /* controller already closed */ }
+        }, 2000);
+
         // Stream each theme to the client as Claude generates it.
-        // First theme typically arrives within 5–10 s, so cards appear fast.
-        for await (const theme of streamGiftThemes({
-          recipient, age, occasion, interests,
-          count: bufferedCount,
-          priceMin, priceMax,
-          level: level as Level,
-          relatedness, vibes,
-          trendingProducts,
-          onLog: (msg) => emit({ type: 'log', msg }),
-        })) {
-          themes.push(theme);
-          emit({ type: 'theme', theme });
+        try {
+          for await (const theme of streamGiftThemes({
+            recipient, age, occasion, interests,
+            count: bufferedCount,
+            priceMin, priceMax,
+            level: level as Level,
+            relatedness, vibes,
+            trendingProducts,
+            model: MODEL,
+            onLog: (msg) => emit({ type: 'log', msg }),
+          })) {
+            if (!firstThemeAt) {
+              firstThemeAt = Date.now();
+              clearInterval(heartbeat);
+              emit({ type: 'log', msg: `[anthropic] first theme after ${((firstThemeAt - genStart) / 1000).toFixed(1)}s` });
+            }
+            themes.push(theme);
+            emit({ type: 'theme', theme });
+          }
+        } finally {
+          clearInterval(heartbeat);
         }
+
+        emit({ type: 'log', msg: `[anthropic] stream complete — ${themes.length} themes parsed` });
 
         if (themes.length === 0) {
           emit({ type: 'error', message: 'No gift ideas could be generated. Please try again.' });
-          controller.close();
+          safeClose();
           return;
         }
 
@@ -195,10 +247,14 @@ export async function POST(request: NextRequest) {
           .catch((err) => console.error('Failed to save recent search:', err));
 
       } catch (err) {
-        console.error('Gift search error:', err);
+        const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+        console.error('[api/search] generation error:', err);
+        // Surface the real reason in the dev panel (a 'log' event), while the
+        // user-facing banner stays friendly (the 'error' event).
+        emit({ type: 'log', msg: `[error] ${detail}` });
         emit({ type: 'error', message: 'Something went wrong generating gift ideas. Please try again.' });
       } finally {
-        controller.close();
+        safeClose();
       }
     },
   });
