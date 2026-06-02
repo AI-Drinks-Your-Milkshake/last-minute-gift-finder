@@ -1,6 +1,6 @@
 import { kv } from '@vercel/kv';
 import sharp from 'sharp';
-import type { GiftTheme } from '@/types';
+import type { GiftTheme, GiftIdea } from '@/types';
 
 /**
  * Server-side product-image enrichment.
@@ -30,6 +30,12 @@ const SERPER_ENDPOINT = 'https://google.serper.dev/images';
 // don't conflict, but v4 entries become unreachable — leaving them in
 // KV is harmless (small amount of wasted storage).
 const CACHE_PREFIX = 'gift_img_v5:';
+// Sentinel cached for products that returned NO usable image. Without this, a
+// known-unfindable product re-queries the search API on every search it appears
+// in — pure repeat waste. Short TTL so it can be retried later (a product may
+// gain a clean image over time).
+const NO_IMAGE_SENTINEL = '__no_image__';
+const NO_IMAGE_TTL_SECONDS = 60 * 60 * 24 * 14; // 14 days
 // Reduced from 4000 — fail fast so a single bad search doesn't stall the pool.
 const LOOKUP_TIMEOUT_MS = 2500;
 // HEAD check timeout — shorter since we're only verifying a direct image URL.
@@ -460,6 +466,7 @@ export async function getProductImage(searchTerms: string): Promise<string | nul
   if (kvConfigured()) {
     try {
       const cached = await kv.get<string>(key);
+      if (cached === NO_IMAGE_SENTINEL) return null; // known-unfindable — don't re-query
       if (cached) return cached;
     } catch (err) {
       console.error('[product-images] KV read failed:', err);
@@ -468,10 +475,14 @@ export async function getProductImage(searchTerms: string): Promise<string | nul
 
   const url = await lookupImage(searchTerms);
 
-  if (url && kvConfigured()) {
+  if (kvConfigured()) {
     try {
-      // No expiry — product photos don't meaningfully change
-      await kv.set(key, url);
+      if (url) {
+        await kv.set(key, url); // success: no expiry — product photos don't change
+      } else {
+        // Cache the miss (short TTL) so we stop re-querying this product.
+        await kv.set(key, NO_IMAGE_SENTINEL, { ex: NO_IMAGE_TTL_SECONDS });
+      }
     } catch (err) {
       console.error('[product-images] KV write failed:', err);
     }
@@ -501,4 +512,103 @@ export async function enrichThemesWithImages(themes: GiftTheme[]): Promise<void>
     }
   }
   await Promise.allSettled(tasks);
+}
+
+// ── Selection-aware lazy enrichment ──────────────────────────────────────────
+// Cost control: each image lookup is one paid search query, so we look up ONLY
+// the gifts we'll actually display, and only as many as needed.
+
+type Relatedness = 'similar' | 'mixed' | 'adventurous';
+function eligibleCeiling(relatedness: Relatedness): 1 | 2 | 3 {
+  if (relatedness === 'similar') return 1;
+  if (relatedness === 'mixed') return 2;
+  return 3;
+}
+
+export interface EnrichResult {
+  searchTerms: string;
+  imageUrl: string | null;
+}
+
+// Run an async fn over items with a concurrency cap.
+async function mapPool<T>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
+/**
+ * Walk the eligible-theme gifts in order and look up images ONLY until `count`
+ * of them have one — backfilling failures from later eligible gifts instead of
+ * enriching everything. Returns the selected themes (gifts' imageUrl set).
+ *
+ *   • Non-eligible themes (e.g. theme 3 for "mixed") are never looked up.
+ *   • Total image queries = count + failures, not "every gift generated."
+ *   • onResult streams each lookup result (used by the SSE /api/images route).
+ *
+ * Mutates gift.imageUrl in place. Never throws.
+ */
+export async function selectAndEnrichGifts(
+  themes: GiftTheme[],
+  relatedness: Relatedness,
+  count: number,
+  onResult?: (r: EnrichResult) => void,
+  concurrency = 8,
+): Promise<GiftTheme[]> {
+  const ceiling = eligibleCeiling(relatedness);
+
+  // Eligible gifts in theme-then-gift order, remembering theme index for regroup.
+  const eligible: Array<{ themeIdx: number; gift: GiftIdea }> = [];
+  themes.forEach((theme, themeIdx) => {
+    if (theme.relatednessLevel > ceiling) return;
+    for (const gift of theme.gifts) eligible.push({ themeIdx, gift });
+  });
+
+  // Enrich in waves: each wave covers the shortfall (count − found), in
+  // parallel. Failures trigger another wave from the next eligible gifts until
+  // `count` have images or we run out of eligible candidates.
+  let cursor = 0;
+  let found = 0;
+  while (found < count && cursor < eligible.length) {
+    const need = count - found;
+    const batch = eligible.slice(cursor, cursor + need);
+    cursor += batch.length;
+    await mapPool(batch, concurrency, async ({ gift }) => {
+      let url: string | null = null;
+      try {
+        url = await getProductImage(gift.searchTerms);
+      } catch {
+        url = null;
+      }
+      gift.imageUrl = url;
+      onResult?.({ searchTerms: gift.searchTerms, imageUrl: url });
+      if (url) found++;
+    });
+  }
+
+  // Regroup the chosen gifts (first `count` eligible WITH images) into themes.
+  const chosen = eligible
+    .filter((e) => typeof e.gift.imageUrl === 'string')
+    .slice(0, count);
+  const byTheme = new Map<number, GiftIdea[]>();
+  for (const { themeIdx, gift } of chosen) {
+    const arr = byTheme.get(themeIdx);
+    if (arr) arr.push(gift);
+    else byTheme.set(themeIdx, [gift]);
+  }
+  const out: GiftTheme[] = [];
+  themes.forEach((theme, themeIdx) => {
+    const gifts = byTheme.get(themeIdx);
+    if (gifts && gifts.length > 0) out.push({ ...theme, gifts });
+  });
+  return out;
 }

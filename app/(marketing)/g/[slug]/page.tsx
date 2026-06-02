@@ -15,8 +15,8 @@
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { getPageResult } from '@/lib/page-results';
-import { enrichThemesWithImages } from '@/lib/product-images';
-import { selectThemesForDisplay, countGifts } from '@/lib/select-gifts';
+import { selectAndEnrichGifts } from '@/lib/product-images';
+import { countGifts } from '@/lib/select-gifts';
 import GiftThemeSection from '@/components/GiftThemeSection';
 
 interface Props {
@@ -53,19 +53,14 @@ export default async function GiftGuidePage({ params }: Props) {
   const page = await getPageResult(params.slug);
   if (!page) notFound();
 
-  // Enrich gifts with product images server-side. Uses KV cache so repeat
-  // visits are fast (cache hits only). First visit after a new search may
-  // take a few extra seconds while images are fetched and cached.
-  await enrichThemesWithImages(page.themes);
-
-  // Apply the SAME selection the wizard grid uses, so this page shows exactly
-  // the same gifts in the same count. Falls back to "show everything" for
-  // pages stored before count/relatedness were persisted.
-  const selectedThemes = selectThemesForDisplay(
+  // Selection-aware enrichment: looks up images ONLY for the eligible gifts we
+  // display, up to `count`, backfilling failures — never the whole set. The
+  // wizard already warmed the KV cache for these exact gifts, so this is almost
+  // all cache hits. Same selection the grid uses → identical gifts + count.
+  const selectedThemes = await selectAndEnrichGifts(
     page.themes,
     page.relatedness ?? 'adventurous',
     page.count ?? countGifts(page.themes),
-    { strict: true },
   );
   const totalGifts = countGifts(selectedThemes);
 

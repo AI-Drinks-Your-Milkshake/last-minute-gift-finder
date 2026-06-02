@@ -97,6 +97,10 @@ export default function GiftFinderWizard() {
   const [committedRelatedness, setCommittedRelatedness] = useState<SearchFormData['relatedness']>('mixed');
   const [pageSlug,            setPageSlug]            = useState<string | null>(null);
   const [pinImageUrl,         setPinImageUrl]         = useState<string | null>(null);
+  // True once the /api/images stream has fully drained (enrichment complete).
+  // Gates the published-count surface logs, since with lazy enrichment many
+  // gifts intentionally stay un-looked-up (undefined) and never resolve.
+  const [imagesSettled,       setImagesSettled]       = useState(false);
 
   // We run a single model (Haiku). If a stale ?model= param is in the URL
   // (e.g. a saved tab from when the model toggle existed), strip it so the
@@ -176,17 +180,21 @@ export default function GiftFinderWizard() {
   // Reads the /api/images SSE stream. Each `result` event updates the
   // matching gift card immediately so images appear card-by-card as they
   // arrive, rather than waiting for the full batch.
-  async function loadImages(initialThemes: GiftTheme[]) {
-    const gifts = initialThemes.flatMap((t) =>
-      t.gifts.map((g) => ({ searchTerms: g.searchTerms })),
-    );
-    if (gifts.length === 0) return;
+  async function loadImages(
+    initialThemes: GiftTheme[],
+    relatedness: SearchFormData['relatedness'],
+    count: number,
+  ) {
+    if (initialThemes.length === 0) { setImagesSettled(true); return; }
 
     try {
+      // Send the full themes + relatedness + count so the server enriches ONLY
+      // the gifts we'll display (eligible themes, up to `count`, backfilling
+      // failures) instead of every gift — minimizing paid image queries.
       const res = await fetch('/api/images', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ gifts }),
+        body:    JSON.stringify({ themes: initialThemes, relatedness, count }),
       });
       if (!res.ok || !res.body) {
         devLog(`[images] response ${res.status} — no body`);
@@ -240,6 +248,9 @@ export default function GiftFinderWizard() {
       }
     } catch (err) {
       devLog(`[images] stream error: ${err}`);
+    } finally {
+      // Stream closed (or errored) → enrichment is done; unblock the surface logs.
+      setImagesSettled(true);
     }
   }
 
@@ -314,6 +325,7 @@ export default function GiftFinderWizard() {
     setError(null);
     setPageSlug(null);
     setPinImageUrl(null);
+    setImagesSettled(false);
 
     let firstTheme = true;
     const allThemes: GiftTheme[] = [];
@@ -344,8 +356,9 @@ export default function GiftFinderWizard() {
       );
 
       if (allThemes.length > 0) {
-        loadImages(allThemes);
+        loadImages(allThemes, form.relatedness, form.count);
       } else if (firstTheme) {
+        setImagesSettled(true);
         devLog('[stream] connection closed before any theme arrived — see the [wait]/[anthropic] lines above for how far the model got');
         setError('Something went wrong. Please try again.');
         setStep(6);
@@ -363,6 +376,7 @@ export default function GiftFinderWizard() {
     devStart.current = Date.now();
     devLog(`[refresh] count=${resultForm.count} level=${resultForm.level} relatedness=${resultForm.relatedness}`);
     setRefreshing(true);
+    setImagesSettled(false);
     const allThemes: GiftTheme[] = [];
 
     try {
@@ -391,7 +405,9 @@ export default function GiftFinderWizard() {
         setCommittedPriceMax(resultForm.priceMax);
         setCommittedVibes(resultForm.vibes ?? []);
         setCommittedRelatedness(resultForm.relatedness);
-        loadImages(allThemes);
+        loadImages(allThemes, resultForm.relatedness, resultForm.count);
+      } else {
+        setImagesSettled(true);
       }
     } finally {
       setRefreshing(false);
@@ -443,16 +459,12 @@ export default function GiftFinderWizard() {
   }, [themes, resultForm, committedCount]);
 
   // ── Published-count dev logs (all four surfaces) ──────────────────────────
-  // Once every image has resolved (no more `undefined`), record exactly what
-  // each surface publishes. The public page and pin image are computed with
-  // the identical shared selection on the full theme set, so the client can
-  // report their counts accurately without a server round-trip.
-  const imagesPending = useMemo(
-    () => themes.some(t => t.gifts.some(g => g.imageUrl === undefined)),
-    [themes],
-  );
-  // Strict selection on the FULL theme set = exactly what the server-rendered
-  // public page and pin image will show (they use committed, not live, values).
+  // Once enrichment has settled, record exactly what each surface publishes.
+  // The public page and pin image are computed with the identical shared
+  // selection on the full theme set, so the client can report their counts
+  // accurately without a server round-trip. (With lazy enrichment, many gifts
+  // intentionally stay un-looked-up, so we gate on imagesSettled, not on every
+  // image having resolved.)
   const publishedThemes = useMemo(
     () => selectThemesForDisplay(themes, committedRelatedness, committedCount, { strict: true }),
     [themes, committedRelatedness, committedCount],
@@ -460,7 +472,7 @@ export default function GiftFinderWizard() {
   const lastLoggedRef = useRef<string>('');
   useEffect(() => {
     if (step !== 'results' || refreshing) return;
-    if (themes.length === 0 || imagesPending) return;
+    if (themes.length === 0 || !imagesSettled) return;
 
     const searchCount   = countGifts(visibleThemes);
     const pinPreview     = flattenGifts(visibleThemes).filter(g => typeof g.imageUrl === 'string').slice(0, 30);
@@ -483,7 +495,7 @@ export default function GiftFinderWizard() {
       devLog(`[surface] ⚠ ERROR shortfall: ${searchCount}/${committedCount} gifts have images — increase oversampling`);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, refreshing, imagesPending, visibleThemes, publishedThemes, committedCount]);
+  }, [step, refreshing, imagesSettled, visibleThemes, publishedThemes, committedCount]);
 
   // ── Step metadata ──
 

@@ -163,9 +163,11 @@ export async function POST(request: NextRequest) {
           new Promise<string[]>((resolve) => setTimeout(() => resolve([]), TRENDS_TIMEOUT_MS)),
         ]);
 
-        // Buffer 15% above requested count — images now load client-side so a
-        // large buffer is unnecessary. Cap at 35.
-        const bufferedCount = Math.min(35, Math.ceil(count * 1.15));
+        // Generate a generous spare margin so image-lookup failures can be
+        // backfilled WITHOUT a second model call. Generation is cheap (~output
+        // tokens only) and we only image-lookup what we display, so extra gifts
+        // here cost almost nothing. Cap at 50 to stay well under max_tokens.
+        const bufferedCount = Math.min(50, count + Math.max(4, Math.ceil(count * 0.15)));
 
         const themes: GiftTheme[] = [];
 

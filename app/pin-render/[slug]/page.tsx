@@ -8,8 +8,8 @@
 
 import { notFound } from 'next/navigation';
 import { getPageResult } from '@/lib/page-results';
-import { enrichThemesWithImages } from '@/lib/product-images';
-import { selectThemesForDisplay, flattenGifts, countGifts } from '@/lib/select-gifts';
+import { selectAndEnrichGifts } from '@/lib/product-images';
+import { flattenGifts, countGifts } from '@/lib/select-gifts';
 import PinTemplate from '@/components/PinTemplate';
 import type { PinProduct } from '@/types';
 
@@ -24,16 +24,13 @@ export default async function PinRenderPage({ params }: Props) {
   const page = await getPageResult(params.slug);
   if (!page) notFound();
 
-  // Enrich with product images (cached in KV so repeat visits are fast).
-  await enrichThemesWithImages(page.themes);
-
-  // Same selection as the wizard grid + public page, so the pin shows exactly
-  // the same gifts in the same count. (strict: images are already resolved.)
-  const selectedThemes = selectThemesForDisplay(
+  // Selection-aware enrichment — same eligible-only, up-to-`count` lookup the
+  // grid + public page use, so the pin shows the identical gifts. The wizard
+  // already warmed the cache for these, so it's almost all cache hits.
+  const selectedThemes = await selectAndEnrichGifts(
     page.themes,
     page.relatedness ?? 'adventurous',
     page.count ?? countGifts(page.themes),
-    { strict: true },
   );
 
   const products: PinProduct[] = flattenGifts(selectedThemes).map((g) => ({

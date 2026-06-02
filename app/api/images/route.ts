@@ -13,7 +13,8 @@
 // and image mismatches.
 
 import { NextRequest } from 'next/server';
-import { getProductImage, imageProvider } from '@/lib/product-images';
+import { selectAndEnrichGifts, imageProvider } from '@/lib/product-images';
+import type { GiftTheme } from '@/types';
 
 // Image enrichment streams while it fans out Brave lookups + corner-sampling
 // (sharp), which can run 15-30s for 36 gifts. Same timeout exposure as the
@@ -29,23 +30,7 @@ function sse(obj: object): string {
   return `data: ${JSON.stringify(obj)}\n\n`;
 }
 
-async function mapConcurrent<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T, emit: (obj: object) => void) => Promise<R>,
-  emit: (obj: object) => void,
-): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let next = 0;
-  async function worker() {
-    while (next < items.length) {
-      const i = next++;
-      results[i] = await fn(items[i], emit);
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return results;
-}
+type Relatedness = 'similar' | 'mixed' | 'adventurous';
 
 export async function POST(request: NextRequest) {
   let body: Record<string, unknown>;
@@ -58,67 +43,65 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  if (!Array.isArray(body.gifts)) {
-    return new Response(sse({ type: 'error', message: 'gifts must be an array.' }), {
+  if (!Array.isArray(body.themes)) {
+    return new Response(sse({ type: 'error', message: 'themes must be an array.' }), {
       status: 400,
       headers: { 'Content-Type': 'text/event-stream' },
     });
   }
 
-  const gifts = (body.gifts as unknown[]).filter(
-    (g): g is { searchTerms: string } =>
-      typeof g === 'object' &&
-      g !== null &&
-      typeof (g as Record<string, unknown>).searchTerms === 'string',
+  const themes = body.themes as GiftTheme[];
+  const relatedness: Relatedness =
+    body.relatedness === 'similar' || body.relatedness === 'adventurous'
+      ? body.relatedness
+      : 'mixed';
+  const totalGifts = themes.reduce(
+    (n, t) => n + (Array.isArray(t.gifts) ? t.gifts.length : 0),
+    0,
   );
-
-  if (gifts.length > MAX_GIFTS) {
-    return new Response(sse({ type: 'error', message: `Too many gifts (max ${MAX_GIFTS}).` }), {
-      status: 400,
-      headers: { 'Content-Type': 'text/event-stream' },
-    });
-  }
+  // Only enrich up to `count` displayed gifts (default: all, for back-compat).
+  const count =
+    typeof body.count === 'number' && Number.isFinite(body.count)
+      ? Math.max(1, Math.min(MAX_GIFTS, Math.floor(body.count)))
+      : totalGifts;
 
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
     async start(controller) {
-      const push = (obj: object) =>
-        controller.enqueue(encoder.encode(sse(obj)));
+      let closed = false;
+      const push = (obj: object) => {
+        if (closed) return;
+        try { controller.enqueue(encoder.encode(sse(obj))); } catch { closed = true; }
+      };
 
-      push({ type: 'log', msg: `[images] fetching for ${gifts.length} gifts via ${imageProvider()}` });
+      push({ type: 'log', msg: `[images] enriching up to ${count} of ${totalGifts} gifts via ${imageProvider()} (lazy, eligible-only)` });
 
       let found = 0;
       let nullCount = 0;
 
-      await mapConcurrent(
-        gifts,
-        CONCURRENCY,
-        async (g, emit) => {
-          let imageUrl: string | null = null;
-          try {
-            imageUrl = await getProductImage(g.searchTerms);
-          } catch {
-            imageUrl = null;
-          }
-
-          if (imageUrl) {
+      // Selection-aware: looks up only eligible gifts, only until `count` have
+      // images (backfilling failures). Non-eligible themes are never queried.
+      await selectAndEnrichGifts(
+        themes,
+        relatedness,
+        count,
+        (r) => {
+          if (r.imageUrl) {
             found++;
-            // Truncate URL for readability but keep enough to identify the host + path.
-            const short = imageUrl.length > 80 ? imageUrl.slice(0, 77) + '…' : imageUrl;
-            emit({ type: 'log', msg: `[images] ✓ ${g.searchTerms} → ${short}` });
+            const short = r.imageUrl.length > 80 ? r.imageUrl.slice(0, 77) + '…' : r.imageUrl;
+            push({ type: 'log', msg: `[images] ✓ ${r.searchTerms} → ${short}` });
           } else {
             nullCount++;
-            emit({ type: 'log', msg: `[images] ✗ ${g.searchTerms} → null` });
+            push({ type: 'log', msg: `[images] ✗ ${r.searchTerms} → null` });
           }
-
-          emit({ type: 'result', searchTerms: g.searchTerms, imageUrl });
+          push({ type: 'result', searchTerms: r.searchTerms, imageUrl: r.imageUrl });
         },
-        push,
+        CONCURRENCY,
       );
 
-      push({ type: 'log', msg: `[images] done — ${found} found, ${nullCount} null` });
-      controller.close();
+      push({ type: 'log', msg: `[images] done — ${found} found, ${nullCount} null (${found + nullCount} queries)` });
+      if (!closed) { closed = true; try { controller.close(); } catch { /* torn down */ } }
     },
   });
 
