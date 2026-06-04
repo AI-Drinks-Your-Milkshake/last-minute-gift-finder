@@ -68,11 +68,14 @@ export default function GiftCard({ gift }: Props) {
         />
       )}
 
-      {/* Product image — only shown when we have a URL that loads successfully */}
+      {/* Product image — locked to a fixed 4:3 box. Tall/portrait images letterbox
+          on white via object-fit: contain instead of stretching the card. The
+          image is positioned absolutely so the box height is definite (a
+          percentage max-height won't resolve against an aspect-ratio height). */}
       {showImage && (
         <div
-          className="flex items-center justify-center bg-white"
-          style={{ aspectRatio: '4 / 3' }}
+          className="bg-white"
+          style={{ position: 'relative', width: '100%', aspectRatio: '4 / 3', overflow: 'hidden' }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -80,7 +83,7 @@ export default function GiftCard({ gift }: Props) {
             alt={gift.title}
             loading="lazy"
             onError={() => setImageBroken(true)}
-            style={{ maxWidth: '90%', maxHeight: '90%', objectFit: 'contain' }}
+            style={{ position: 'absolute', top: '6%', left: '6%', width: '88%', height: '88%', objectFit: 'contain' }}
           />
         </div>
       )}
