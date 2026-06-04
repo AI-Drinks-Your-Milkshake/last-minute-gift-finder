@@ -37,7 +37,7 @@ const STEP_NAMES = ['Who', 'Age', 'Occasion', 'About them', 'Vibe', 'Adventurous
 const TOTAL_STEPS = STEP_NAMES.length;
 const MAX_VIBES = 2;
 
-const TAGLINE = 'Strix. n. Owl genus. Large eyes, binocular vision, sharp in the dark.';
+const TAGLINE = 'As an Amazon Associate we earn from qualifying purchases.';
 
 type WizardStep = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 'loading' | 'results';
 
@@ -583,7 +583,7 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
           fontFamily: 'inherit',
         }}
       >
-        <span style={{ color: C.accent }}>✦</span> Strix
+        <span style={{ color: C.accent }}>✦</span> LastMinuteGiftFinder
       </button>
 
       {isWizardStep && (
@@ -1447,7 +1447,7 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
       {/* On failure we land back here — keep the diagnostics visible so the
           logs that explain WHY (timeout vs [error] vs 0 themes) don't vanish
           with the loading screen. */}
-      {error && (
+      {error && isAdmin && (
         <div style={{ marginTop: 32 }}>
           <p style={{
             fontSize: 10, color: C.textMuted, letterSpacing: '0.08em',
@@ -1478,7 +1478,7 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
         ))}
       </div>
       <p style={{ fontSize: 13, color: C.textMuted }}>Finding the perfect gifts…</p>
-      <DevPanel />
+      {isAdmin && <DevPanel />}
     </div>
   );
 
@@ -1537,9 +1537,11 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
         </p>
       </footer>
 
-      <div style={{ padding: '0 8px 40px' }}>
-        <DevPanel />
-      </div>
+      {isAdmin && (
+        <div style={{ padding: '0 8px 40px' }}>
+          <DevPanel />
+        </div>
+      )}
     </div>
   );
 
