@@ -44,7 +44,7 @@ export default function GiftCard({ gift }: Props) {
 
   return (
     <div
-      className="group flex flex-col overflow-hidden rounded-2xl transition-all duration-200 hover:-translate-y-1"
+      className="card-in group flex flex-col overflow-hidden rounded-2xl transition-all duration-200 hover:-translate-y-1"
       style={{
         backgroundColor: 'var(--surface-card)',
         border: '1px solid var(--border-raise)',

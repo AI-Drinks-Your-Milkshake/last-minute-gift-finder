@@ -5,7 +5,7 @@ import { useState, useMemo, useRef, useEffect } from 'react';
 declare global {
   interface Window { __devLog?: (msg: string) => void; }
 }
-import type { GiftTheme, SearchFormData } from '@/types';
+import type { GiftTheme, GiftIdea, SearchFormData } from '@/types';
 import GiftThemeSection from './GiftThemeSection';
 import PinPreview from './PinPreview';
 import DevPanel, { clearDevLog } from './DevPanel';
@@ -97,12 +97,40 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
   const [committedRelatedness, setCommittedRelatedness] = useState<SearchFormData['relatedness']>('mixed');
   const [pageSlug,            setPageSlug]            = useState<string | null>(null);
   const [pinImageUrl,         setPinImageUrl]         = useState<string | null>(null);
-  // True once the /api/images stream has fully drained (enrichment complete).
-  // Gates the published-count surface logs, since with lazy enrichment many
-  // gifts intentionally stay un-looked-up (undefined) and never resolve.
+  // True once the /api/cards stream has fully closed. Drives the loading band
+  // (narration + progress) and gates the published-count surface logs.
   const [imagesSettled,       setImagesSettled]       = useState(false);
   // Transient hint shown after the (MVP no-op) "Save this person" button.
   const [saveHinted,          setSaveHinted]          = useState(false);
+  // Streaming progress (complete cards emitted / requested) for the loading bar.
+  const [progress,            setProgress]            = useState<{ emitted: number; target: number }>({ emitted: 0, target: 9 });
+  // Input-aware narration shown while the first cards are being generated.
+  const [narrationIdx,        setNarrationIdx]        = useState(0);
+  const narrationTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const narrationLines = useMemo(() => {
+    const who = form.recipient || 'them';
+    const interest = form.interests ? form.interests.split(/[,;]/)[0].trim() : '';
+    return [
+      `Getting to know ${who}…`,
+      interest ? `Zeroing in on ${interest}…` : `Reading what makes ${who} tick…`,
+      'Scanning thousands of products…',
+      'Picking the dead-on matches…',
+      `Hunting for a few they'd never expect…`,
+      'Lining up the photos…',
+    ];
+  }, [form.recipient, form.interests]);
+
+  function startNarration() {
+    setNarrationIdx(0);
+    if (narrationTimer.current) clearInterval(narrationTimer.current);
+    narrationTimer.current = setInterval(() => {
+      setNarrationIdx((i) => Math.min(i + 1, narrationLines.length - 1));
+    }, 2200);
+  }
+  function stopNarration() {
+    if (narrationTimer.current) { clearInterval(narrationTimer.current); narrationTimer.current = null; }
+  }
 
   // We run a single model (Haiku). If a stale ?model= param is in the URL
   // (e.g. a saved tab from when the model toggle existed), strip it so the
@@ -180,123 +208,40 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
     window.location.href = '/app';
   }
 
-  // ── Lazy image loader ──
-  // Fires /api/images (SSE) after cards are already visible. Cards update
-  // one-by-one as results stream in — no waiting for the full batch.
+  // ── Complete-card stream consumer ──
+  // Reads /api/cards (SSE). Each `card` event is a fully-formed gift (text +
+  // image) in strict display order — we append it to its theme so the card
+  // locks in complete, no text-only state. `progress` drives the loading bar.
+  // Returns when the stream closes.
+  async function runCardStream(body: object): Promise<{
+    slug: string | null; pinUrl: string | null; emitted: number; errored: boolean;
+  }> {
+    const start = Date.now();
+    const accum: GiftTheme[] = [];
+    let slug: string | null = null;
+    let pinUrl: string | null = null;
+    let emitted = 0;
+    let errored = false;
 
-  // ── Lazy image loader ──
-  // Reads the /api/images SSE stream. Each `result` event updates the
-  // matching gift card immediately so images appear card-by-card as they
-  // arrive, rather than waiting for the full batch.
-  async function loadImages(
-    initialThemes: GiftTheme[],
-    relatedness: SearchFormData['relatedness'],
-    count: number,
-  ) {
-    if (initialThemes.length === 0) { setImagesSettled(true); return; }
-
-    try {
-      // Send the full themes + relatedness + count so the server enriches ONLY
-      // the gifts we'll display (eligible themes, up to `count`, backfilling
-      // failures) instead of every gift — minimizing paid image queries.
-      const res = await fetch('/api/images', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ themes: initialThemes, relatedness, count }),
-      });
-      if (!res.ok || !res.body) {
-        devLog(`[images] response ${res.status} — no body`);
-        return;
-      }
-
-      const reader  = res.body.getReader();
-      const decoder = new TextDecoder();
-      let   buf     = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buf += decoder.decode(value, { stream: true });
-
-        // SSE events separated by '\n\n'
-        const parts = buf.split('\n\n');
-        buf = parts.pop() ?? '';
-
-        for (const part of parts) {
-          const dataLine = part.split('\n').find((l) => l.startsWith('data: '));
-          if (!dataLine) continue;
-          try {
-            const ev = JSON.parse(dataLine.slice(6)) as {
-              type: string;
-              msg?: string;
-              searchTerms?: string;
-              imageUrl?: string | null;
-            };
-
-            if (ev.type === 'log' && ev.msg) {
-              devLog(ev.msg);
-            }
-
-            if (ev.type === 'result' && ev.searchTerms !== undefined) {
-              const resolvedUrl = ev.imageUrl ?? null;
-              setThemes((prev) =>
-                prev.map((theme) => ({
-                  ...theme,
-                  gifts: theme.gifts.map((gift) =>
-                    gift.searchTerms === ev.searchTerms
-                      ? { ...gift, imageUrl: resolvedUrl }
-                      : gift,
-                  ),
-                })),
-              );
-            }
-          } catch { /* malformed SSE event — skip */ }
-        }
-      }
-    } catch (err) {
-      devLog(`[images] stream error: ${err}`);
-    } finally {
-      // Stream closed (or errored) → enrichment is done; unblock the surface logs.
-      setImagesSettled(true);
-    }
-  }
-
-  // ── SSE stream consumer ──
-  // Reads the text/event-stream from /api/search and calls onTheme for each
-  // arriving theme, onDone when the stream closes, and onError on failure.
-
-  async function consumeSearchStream(
-    body:    object,
-    onTheme: (theme: GiftTheme) => void,
-    onDone:  (slug: string | null, pinImageUrl: string | null) => void,
-    onError: (msg: string) => void,
-  ): Promise<void> {
-    const streamStart = Date.now();
-    const res = await fetch('/api/search', {
+    const res = await fetch('/api/cards', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(body),
     });
-
-    devLog(`[stream] /api/search responded ${res.status}`);
-    if (!res.body) { onError('No response body.'); return; }
+    devLog(`[stream] /api/cards responded ${res.status}`);
+    if (!res.body) return { slug, pinUrl, emitted, errored: true };
 
     const reader  = res.body.getReader();
     const decoder = new TextDecoder();
     let   buf     = '';
-    let   themeCount = 0;
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) {
-        devLog(`[stream] closed after ${((Date.now() - streamStart) / 1000).toFixed(1)}s — ${themeCount} themes received`);
+        devLog(`[stream] closed after ${((Date.now() - start) / 1000).toFixed(1)}s — ${emitted} cards`);
         break;
       }
-
       buf += decoder.decode(value, { stream: true });
-
-      // SSE events are separated by '\n\n'.
       const parts = buf.split('\n\n');
       buf = parts.pop() ?? '';
 
@@ -305,120 +250,121 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
         if (!dataLine) continue;
         try {
           const ev = JSON.parse(dataLine.slice(6)) as {
-            type: string; theme?: GiftTheme; pageSlug?: string; pinImageUrl?: string; message?: string; msg?: string;
+            type: string; msg?: string; message?: string;
+            card?: { themeId: string; themeLabel: string; relatednessLevel: 1 | 2 | 3 } & GiftIdea;
+            emitted?: number; target?: number; pageSlug?: string; pinImageUrl?: string;
           };
           if (ev.type === 'log') { const m = ev.msg ?? ev.message; if (m) devLog(m); }
-          if (ev.type === 'theme' && ev.theme) {
-            themeCount++;
-            devLog(`[SSE] theme: "${ev.theme.label}" (${ev.theme.gifts.length} gifts, level ${ev.theme.relatednessLevel})`);
-            onTheme(ev.theme);
+          else if (ev.type === 'card' && ev.card) {
+            const c = ev.card;
+            const gift: GiftIdea = {
+              title: c.title, description: c.description, priceRange: c.priceRange,
+              priceMin: c.priceMin, priceMax: c.priceMax, searchTerms: c.searchTerms, imageUrl: c.imageUrl,
+            };
+            const last = accum[accum.length - 1];
+            if (!last || last.id !== c.themeId) {
+              accum.push({ id: c.themeId, label: c.themeLabel, relatednessLevel: c.relatednessLevel, gifts: [gift] });
+            } else {
+              last.gifts.push(gift);
+            }
+            emitted++;
+            setThemes(accum.map((t) => ({ ...t, gifts: [...t.gifts] })));
           }
-          if (ev.type === 'done')                  onDone(ev.pageSlug ?? null, ev.pinImageUrl ?? null);
-          if (ev.type === 'error' && ev.message)   onError(ev.message);
+          else if (ev.type === 'progress' && typeof ev.emitted === 'number') {
+            setProgress({ emitted: ev.emitted, target: ev.target ?? progress.target });
+          }
+          else if (ev.type === 'done') { slug = ev.pageSlug ?? null; pinUrl = ev.pinImageUrl ?? null; }
+          else if (ev.type === 'error') { errored = true; if (ev.message) setError(ev.message); }
         } catch { /* malformed event — skip */ }
       }
     }
+    return { slug, pinUrl, emitted, errored };
   }
 
   // ── Initial search ──
-  // Shows results after the FIRST theme arrives (typically 5–10 s), then
-  // adds themes progressively as Claude generates them.
+  // Optimistic: jump straight to the results layout (header + their chips), then
+  // stream complete cards in. Narration + a progress bar fill the brief wait
+  // before the first card lands (~5-7s).
 
   async function handleSubmit() {
     clearDevLog();
     devStart.current = Date.now();
     devLog(`[search] ${form.recipient} · ${form.age} · ${form.occasion}${form.interests ? ` · "${form.interests.slice(0, 40)}"` : ''}`);
-    setStep('loading');
+
     setThemes([]);
     setError(null);
     setPageSlug(null);
     setPinImageUrl(null);
     setImagesSettled(false);
+    setProgress({ emitted: 0, target: form.count });
 
-    let firstTheme = true;
-    const allThemes: GiftTheme[] = [];
+    // Commit the search params immediately so the header, sidebar summary and
+    // pin preview reflect THIS search from the first frame.
+    setResultForm({ ...form });
+    setCommittedLevel(form.level);
+    setCommittedCount(form.count);
+    setCommittedPriceMin(form.priceMin);
+    setCommittedPriceMax(form.priceMax);
+    setCommittedVibes(form.vibes ?? []);
+    setCommittedRelatedness(form.relatedness);
+
+    startNarration();
+    setStep('results'); // optimistic transition — no separate skeleton screen
 
     try {
-      await consumeSearchStream(
-        form,
-        (theme) => {
-          allThemes.push(theme);
-          setThemes([...allThemes]);
-          if (firstTheme) {
-            firstTheme = false;
-            setResultForm({ ...form });
-            setCommittedLevel(form.level);
-            setCommittedCount(form.count);
-            setCommittedPriceMin(form.priceMin);
-            setCommittedPriceMax(form.priceMax);
-            setCommittedVibes(form.vibes ?? []);
-            setCommittedRelatedness(form.relatedness);
-            setStep('results');           // ← cards visible after first theme
-          }
-        },
-        (slug, pinUrl) => { setPageSlug(slug); if (pinUrl) setPinImageUrl(pinUrl); },
-        (msg)  => {
-          setError(msg);
-          if (firstTheme) setStep(6);    // only go back if nothing was shown
-        },
-      );
-
-      if (allThemes.length > 0) {
-        loadImages(allThemes, form.relatedness, form.count);
-      } else if (firstTheme) {
-        setImagesSettled(true);
-        devLog('[stream] connection closed before any theme arrived — see the [wait]/[anthropic] lines above for how far the model got');
+      const { emitted, slug, pinUrl, errored } = await runCardStream({
+        recipient: form.recipient, age: form.age, occasion: form.occasion, interests: form.interests,
+        count: form.count, priceMin: form.priceMin, priceMax: form.priceMax,
+        level: form.level, relatedness: form.relatedness, vibes: form.vibes ?? [],
+      });
+      if (slug) setPageSlug(slug);
+      if (pinUrl) setPinImageUrl(pinUrl);
+      if (emitted === 0 && !errored) {
+        devLog('[stream] 0 cards received — see the [error]/[anthropic] lines above');
         setError('Something went wrong. Please try again.');
         setStep(6);
       }
     } catch (err) {
       devLog(`[stream] aborted: ${err instanceof Error ? err.message : String(err)}`);
       setError('Network error. Please check your connection and try again.');
-      if (firstTheme) setStep(6);
+      setStep(6);
+    } finally {
+      setImagesSettled(true);
+      stopNarration();
     }
   }
 
-  // ── Refresh (re-fetch with new depth/count from sidebar) ──
+  // ── Refresh (re-stream with new depth/count/etc from the sidebar) ──
 
   async function handleRefresh() {
     devStart.current = Date.now();
     devLog(`[refresh] count=${resultForm.count} level=${resultForm.level} relatedness=${resultForm.relatedness}`);
     setRefreshing(true);
+    setThemes([]);
     setImagesSettled(false);
-    const allThemes: GiftTheme[] = [];
+    setProgress({ emitted: 0, target: resultForm.count });
+    startNarration();
 
     try {
-      const apiBody = {
-        ...form,
-        level:       resultForm.level,
-        count:       resultForm.count,
-        priceMin:    resultForm.priceMin,
-        priceMax:    resultForm.priceMax,
-        vibes:       resultForm.vibes ?? [],
-        relatedness: resultForm.relatedness,
-      };
-
-      await consumeSearchStream(
-        apiBody,
-        (theme) => { allThemes.push(theme); },
-        (slug, pinUrl) => { if (slug) setPageSlug(slug); if (pinUrl) setPinImageUrl(pinUrl); },
-        ()      => { /* refresh errors are silent */ },
-      );
-
-      if (allThemes.length > 0) {
-        setThemes(allThemes);
+      const { emitted, slug, pinUrl } = await runCardStream({
+        recipient: form.recipient, age: form.age, occasion: form.occasion, interests: form.interests,
+        count: resultForm.count, priceMin: resultForm.priceMin, priceMax: resultForm.priceMax,
+        level: resultForm.level, relatedness: resultForm.relatedness, vibes: resultForm.vibes ?? [],
+      });
+      if (emitted > 0) {
         setCommittedLevel(resultForm.level);
         setCommittedCount(resultForm.count);
         setCommittedPriceMin(resultForm.priceMin);
         setCommittedPriceMax(resultForm.priceMax);
         setCommittedVibes(resultForm.vibes ?? []);
         setCommittedRelatedness(resultForm.relatedness);
-        loadImages(allThemes, resultForm.relatedness, resultForm.count);
-      } else {
-        setImagesSettled(true);
+        if (slug) setPageSlug(slug);
+        if (pinUrl) setPinImageUrl(pinUrl);
       }
     } finally {
       setRefreshing(false);
+      setImagesSettled(true);
+      stopNarration();
     }
   }
 
@@ -1539,16 +1485,47 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
         </span>
       </div>
 
-      {refreshing ? loadingSkeleton : (
-        visibleThemes.length > 0 ? (
-          visibleThemes.map(theme => <GiftThemeSection key={theme.id} theme={theme} cols={gridCols} />)
-        ) : (
-          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: '40px 24px', textAlign: 'center' }}>
-            <p style={{ fontSize: 14, color: C.textSec }}>
-              No gifts match the current filters. Try widening the price range or adjusting the adventurousness setting.
-            </p>
+      {/* Loading band — input-aware narration + progress while complete cards stream in */}
+      {!imagesSettled && (
+        <div style={{ marginBottom: 28, maxWidth: 520 }}>
+          <p style={{ fontSize: 15, color: C.textSec, marginBottom: 10, lineHeight: 1.4 }}>
+            {narrationLines[narrationIdx]}
+          </p>
+          <div style={{ height: 4, background: '#1a1a24', borderRadius: 4, overflow: 'hidden' }}>
+            <div style={{
+              height: '100%', background: C.accent, borderRadius: 4,
+              width: `${progress.target > 0 ? Math.max(6, Math.round((progress.emitted / progress.target) * 100)) : 6}%`,
+              transition: 'width 0.4s ease',
+              animation: progress.emitted === 0 ? 'pulseBar 1.2s ease-in-out infinite' : 'none',
+            }} />
           </div>
-        )
+          {progress.emitted > 0 && (
+            <p style={{ fontSize: 11, color: C.textMuted, marginTop: 6 }}>
+              {progress.emitted} of {progress.target} ideas
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Complete cards — each locks in (text + image) and fades in, in order */}
+      {visibleThemes.map(theme => <GiftThemeSection key={theme.id} theme={theme} cols={gridCols} />)}
+
+      {/* Trailing skeletons — signal more complete cards are still arriving */}
+      {!imagesSettled && progress.emitted < progress.target && (
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`, gap: 16, marginTop: visibleThemes.length > 0 ? 16 : 0 }}>
+          {Array.from({ length: Math.min(gridCols, Math.max(1, progress.target - progress.emitted)) }).map((_, i) => (
+            <div key={i} className="animate-pulse" style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, minHeight: 320 }} />
+          ))}
+        </div>
+      )}
+
+      {/* No-match message only once streaming has fully settled */}
+      {imagesSettled && visibleThemes.length === 0 && (
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, padding: '40px 24px', textAlign: 'center' }}>
+          <p style={{ fontSize: 14, color: C.textSec }}>
+            No gifts match the current filters. Try widening the price range or adjusting the adventurousness setting.
+          </p>
+        </div>
       )}
 
       <footer style={{ marginTop: 48, paddingTop: 24, borderTop: `1px solid #16161e`, textAlign: 'center' }}>

@@ -166,3 +166,17 @@ select option {
 .dark-textarea::placeholder {
   color: #44445a;
 }
+
+/* ── Streaming UX ─────────────────────────────────────────────────────────── */
+/* Complete gift cards fade/slide in as they stream. */
+@keyframes cardIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+.card-in { animation: cardIn 0.35s ease both; }
+
+/* Pre-first-card loading bar pulse. */
+@keyframes pulseBar {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 1; }
+}
