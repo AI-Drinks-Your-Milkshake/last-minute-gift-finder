@@ -559,13 +559,6 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
     cursor: 'pointer', fontWeight: active ? 500 : 400, fontFamily: 'inherit',
   });
 
-  const levelCardStyle = (active: boolean): React.CSSProperties => ({
-    flex: 1,
-    background:  active ? 'rgba(232,114,74,0.08)' : C.surface,
-    border:     `1px solid ${active ? C.accent : C.border}`,
-    borderRadius: 12, padding: '14px 12px', cursor: 'pointer', textAlign: 'left',
-  });
-
   const vibeCardStyle = (active: boolean): React.CSSProperties => ({
     background:  active ? 'rgba(232,114,74,0.08)' : C.surface,
     border:     `1px solid ${active ? C.accent : C.border}`,
@@ -1398,7 +1391,7 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
         Tell us about them.
       </h2>
       <p style={{ fontSize: 15, color: C.textSec, marginBottom: 24, lineHeight: 1.5 }}>
-        Interests, hobbies, quirks — anything that helps paint a picture. Optional — skip if you want general ideas.
+        Interests, hobbies, quirks — anything that helps paint a picture.
       </p>
       <textarea
         placeholder="e.g. obsessed with cooking and craft beer, loves camping, recently got into woodworking…"
@@ -1413,15 +1406,37 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
         }}
       />
       <p style={{ fontSize: 12, color: C.textMuted, marginBottom: 24 }}>More specific = better results</p>
-      <p style={{ fontSize: 13, color: C.textSec, marginBottom: 12 }}>How deep into these interests are they?</p>
-      <div style={{ display: 'flex', gap: 10, marginBottom: 36 }}>
-        {LEVELS.map(l => (
-          <button key={l.value} onClick={() => update('level', l.value)} style={levelCardStyle(form.level === l.value)}>
-            <p style={{ fontSize: 13, fontWeight: 500, color: C.textPri, marginBottom: 2 }}>{l.label}</p>
-            <p style={{ fontSize: 11, color: C.textSec }}>{l.desc}</p>
-          </button>
-        ))}
-      </div>
+      {/* Turbo toggle — defaults to "interested"; flipping it on switches the
+          prompt to "enthusiast" (niche, deep-cut picks). Replaces the old
+          three-card depth selector to cut cognitive load. */}
+      {(() => {
+        const turbo = form.level === 'enthusiast';
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 36, flexWrap: 'wrap' }}>
+            <button
+              onClick={() => update('level', turbo ? 'interested' : 'enthusiast')}
+              aria-pressed={turbo}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                padding: '9px 16px', borderRadius: 20, fontSize: 13, fontWeight: 500,
+                cursor: 'pointer', fontFamily: 'inherit',
+                border: `1px solid ${turbo ? C.accent : C.border}`,
+                background: turbo ? C.accent : C.surface,
+                color: turbo ? '#fff' : C.textSec,
+                transition: 'all 0.15s',
+              }}
+            >
+              <span style={{ fontSize: 14 }}>🔥</span>
+              Turbo mode
+            </button>
+            <span style={{ fontSize: 12, color: C.textMuted, maxWidth: 320, lineHeight: 1.4 }}>
+              {turbo
+                ? 'On — niche, deep-cut picks for someone who’s really into it.'
+                : 'Flip on if they’re a fanatic — we’ll go niche and specific.'}
+            </span>
+          </div>
+        );
+      })()}
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
         <button onClick={() => setStep(3)} style={backBtn}>← Back</button>
         <button onClick={() => setStep(5)} style={continueBtn(true)}>
