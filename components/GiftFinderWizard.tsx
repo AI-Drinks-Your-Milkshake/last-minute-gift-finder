@@ -640,6 +640,45 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
     </div>
   );
 
+  // ── Display controls footer (results sidebar) ─────────────────────────
+  // Layout-only: changes how many columns the cards render in. Lives in its
+  // own "Display" section (not "Refine results") so it's clear it doesn't
+  // re-run the search.
+  const displayFooter = (
+    <div style={{ padding: '12px 20px', borderTop: `1px solid #16161e`, flexShrink: 0 }}>
+      <p style={{ fontSize: 10, color: C.textMuted, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 8 }}>
+        Display
+      </p>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <span style={{ fontSize: 12, color: C.textSec }}>Columns</span>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {[2, 3, 4, 5, 6].map((n) => {
+            const active = gridCols === n;
+            return (
+              <button
+                key={n}
+                onClick={() => setGridCols(n)}
+                aria-label={`${n} columns`}
+                title={`${n} columns`}
+                style={{
+                  width: 30, height: 28, borderRadius: 8,
+                  border: `1px solid ${active ? C.accent : C.border}`,
+                  background: active ? 'rgba(232,114,74,0.12)' : C.surface,
+                  color: active ? C.textPri : C.textSec,
+                  fontSize: 12, fontWeight: active ? 600 : 400,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                {n}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+
   // ── Wizard / loading sidebar ───────────────────────────────────────────
 
   const wizardSidebar = (
@@ -914,25 +953,6 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
           </div>
         </div>
 
-        {/* Grid columns — display-only preference, no re-fetch */}
-        <div style={{ marginBottom: 8 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-            <p style={{ fontSize: 12, color: C.textSec }}>Grid columns</p>
-            <span style={{ fontSize: 12, color: C.textPri, fontWeight: 500 }}>{gridCols}</span>
-          </div>
-          <input
-            type="range" min={1} max={10} step={1}
-            value={gridCols}
-            onChange={e => setGridCols(Number(e.target.value))}
-            style={{ width: '100%', accentColor: C.accent }}
-            aria-label="Grid columns"
-          />
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
-            <span style={{ fontSize: 11, color: C.textMuted }}>1</span>
-            <span style={{ fontSize: 11, color: C.textMuted }}>10</span>
-          </div>
-        </div>
-
       </div>
 
       {/* Sticky refresh button footer */}
@@ -953,7 +973,7 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
         </div>
       )}
 
-      {sidebarBrandFooter}
+      {displayFooter}
     </aside>
   );
 
