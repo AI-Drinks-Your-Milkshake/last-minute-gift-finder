@@ -48,3 +48,17 @@ export const OCCASIONS: readonly string[] = [
   // Fallback
   'Other',
 ];
+
+// The highest-volume gifting occasions, shown by default in the wizard's
+// occasion step. The full list is revealed behind a "More occasions" toggle.
+// Values must match entries in OCCASIONS exactly.
+export const COMMON_OCCASIONS: readonly string[] = [
+  'Birthday',
+  'Anniversary',
+  'Just Because',
+  'Thank You',
+  'Holiday / Christmas',
+  "Valentine's Day",
+  "Mother's Day",
+  "Father's Day",
+];

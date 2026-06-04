@@ -10,7 +10,7 @@ import GiftThemeSection from './GiftThemeSection';
 import PinPreview from './PinPreview';
 import DevPanel, { clearDevLog } from './DevPanel';
 import { RECIPIENT_GROUPS, COMMON_RECIPIENTS } from '@/lib/recipients';
-import { OCCASIONS } from '@/lib/occasions';
+import { OCCASIONS, COMMON_OCCASIONS } from '@/lib/occasions';
 import { AESTHETICS, FEATURED_VIBE_VALUES } from '@/lib/aesthetics';
 import { selectThemesForDisplay, countGifts, flattenGifts } from '@/lib/select-gifts';
 
@@ -99,6 +99,8 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
   const [showAllVibesSidebar, setShowAllVibesSidebar] = useState(false);
   // Who step defaults to a "Common" cluster; this reveals the full grouped list.
   const [showAllRecipients,   setShowAllRecipients]   = useState(false);
+  // Occasion step defaults to the common set; this reveals the full list.
+  const [showAllOccasions,    setShowAllOccasions]    = useState(false);
   const [form,           setForm]           = useState<SearchFormData>(DEFAULT_FORM);
   const [themes,         setThemes]         = useState<GiftTheme[]>([]);
   const [error,          setError]          = useState<string | null>(null);
@@ -1359,9 +1361,26 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
       </h2>
       <p style={{ fontSize: 15, color: C.textSec, marginBottom: 28, lineHeight: 1.5 }}>Pick the one that fits best.</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 36 }}>
-        {OCCASIONS.map(o => (
+        {(showAllOccasions
+          ? OCCASIONS
+          : [
+              ...COMMON_OCCASIONS,
+              ...(form.occasion && !COMMON_OCCASIONS.includes(form.occasion) ? [form.occasion] : []),
+            ]
+        ).map(o => (
           <button key={o} onClick={() => update('occasion', o)} onDoubleClick={() => { update('occasion', o); setStep(4); }} style={chipStyle(form.occasion === o)}>{o}</button>
         ))}
+        <button
+          onClick={() => setShowAllOccasions(v => !v)}
+          style={{
+            ...chipStyle(false),
+            background: 'transparent',
+            borderStyle: 'dashed',
+            color: C.textMuted,
+          }}
+        >
+          {showAllOccasions ? 'Show fewer' : 'More occasions…'}
+        </button>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
         <button onClick={() => setStep(2)} style={backBtn}>← Back</button>
