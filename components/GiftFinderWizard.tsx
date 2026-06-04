@@ -108,6 +108,16 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
   const [narrationIdx,        setNarrationIdx]        = useState(0);
   const narrationTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Reveal queue — the stream fills `received`; a steady timer pops one card at
+  // a time onto screen, so strict-order server bursts drip in smoothly rather
+  // than flooding. Purely visual (no extra requests).
+  const revealTimer  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const receivedRef  = useRef<Array<{ themeId: string; themeLabel: string; level: 1 | 2 | 3; gift: GiftIdea }>>([]);
+  const revealedRef  = useRef(0);
+  const streamDoneRef = useRef(false);
+  const abortRef     = useRef<AbortController | null>(null);
+  const REVEAL_MS = 120;
+
   const narrationLines = useMemo(() => {
     const who = form.recipient || 'them';
     const interest = form.interests ? form.interests.split(/[,;]/)[0].trim() : '';
@@ -130,6 +140,45 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
   }
   function stopNarration() {
     if (narrationTimer.current) { clearInterval(narrationTimer.current); narrationTimer.current = null; }
+  }
+
+  // Regroup the revealed slice of received cards back into themes for display.
+  function regroupRevealed(): GiftTheme[] {
+    const items = receivedRef.current.slice(0, revealedRef.current);
+    const out: GiftTheme[] = [];
+    for (const it of items) {
+      const last = out[out.length - 1];
+      if (!last || last.id !== it.themeId) {
+        out.push({ id: it.themeId, label: it.themeLabel, relatednessLevel: it.level, gifts: [it.gift] });
+      } else {
+        last.gifts.push(it.gift);
+      }
+    }
+    return out;
+  }
+
+  function stopReveal() {
+    if (revealTimer.current) { clearInterval(revealTimer.current); revealTimer.current = null; }
+  }
+
+  // Reset buffers and start the steady one-at-a-time reveal cadence.
+  function startReveal() {
+    receivedRef.current = [];
+    revealedRef.current = 0;
+    streamDoneRef.current = false;
+    stopReveal();
+    revealTimer.current = setInterval(() => {
+      if (revealedRef.current < receivedRef.current.length) {
+        revealedRef.current += 1;
+        setThemes(regroupRevealed());
+        setProgress((p) => ({ emitted: revealedRef.current, target: p.target }));
+      } else if (streamDoneRef.current) {
+        // Buffer drained and the stream has closed → finish.
+        stopReveal();
+        setImagesSettled(true);
+        stopNarration();
+      }
+    }, REVEAL_MS);
   }
 
   // We run a single model (Haiku). If a stale ?model= param is in the URL
@@ -194,11 +243,15 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
 
   function resetSearch() {
     clearDevLog();
+    abortRef.current?.abort();     // cancel any in-flight card stream
+    stopReveal();
+    stopNarration();
     setForm(DEFAULT_FORM);
     setThemes([]);
     setError(null);
     setPageSlug(null);
     setPinImageUrl(null);
+    setImagesSettled(false);
     setStep(1);
   }
 
@@ -213,11 +266,10 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
   // image) in strict display order — we append it to its theme so the card
   // locks in complete, no text-only state. `progress` drives the loading bar.
   // Returns when the stream closes.
-  async function runCardStream(body: object): Promise<{
+  async function runCardStream(body: object, signal?: AbortSignal): Promise<{
     slug: string | null; pinUrl: string | null; emitted: number; errored: boolean;
   }> {
     const start = Date.now();
-    const accum: GiftTheme[] = [];
     let slug: string | null = null;
     let pinUrl: string | null = null;
     let emitted = 0;
@@ -227,6 +279,7 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify(body),
+      signal,
     });
     devLog(`[stream] /api/cards responded ${res.status}`);
     if (!res.body) return { slug, pinUrl, emitted, errored: true };
@@ -257,22 +310,17 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
           if (ev.type === 'log') { const m = ev.msg ?? ev.message; if (m) devLog(m); }
           else if (ev.type === 'card' && ev.card) {
             const c = ev.card;
-            const gift: GiftIdea = {
-              title: c.title, description: c.description, priceRange: c.priceRange,
-              priceMin: c.priceMin, priceMax: c.priceMax, searchTerms: c.searchTerms, imageUrl: c.imageUrl,
-            };
-            const last = accum[accum.length - 1];
-            if (!last || last.id !== c.themeId) {
-              accum.push({ id: c.themeId, label: c.themeLabel, relatednessLevel: c.relatednessLevel, gifts: [gift] });
-            } else {
-              last.gifts.push(gift);
-            }
+            // Buffer it — the reveal queue renders one card at a time.
+            receivedRef.current.push({
+              themeId: c.themeId, themeLabel: c.themeLabel, level: c.relatednessLevel,
+              gift: {
+                title: c.title, description: c.description, priceRange: c.priceRange,
+                priceMin: c.priceMin, priceMax: c.priceMax, searchTerms: c.searchTerms, imageUrl: c.imageUrl,
+              },
+            });
             emitted++;
-            setThemes(accum.map((t) => ({ ...t, gifts: [...t.gifts] })));
           }
-          else if (ev.type === 'progress' && typeof ev.emitted === 'number') {
-            setProgress({ emitted: ev.emitted, target: ev.target ?? progress.target });
-          }
+          // (server `progress` events are ignored — the reveal queue drives the bar)
           else if (ev.type === 'done') { slug = ev.pageSlug ?? null; pinUrl = ev.pinImageUrl ?? null; }
           else if (ev.type === 'error') { errored = true; if (ev.message) setError(ev.message); }
         } catch { /* malformed event — skip */ }
@@ -308,6 +356,9 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
     setCommittedVibes(form.vibes ?? []);
     setCommittedRelatedness(form.relatedness);
 
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
+    startReveal();      // resets buffers + starts the one-at-a-time cadence
     startNarration();
     setStep('results'); // optimistic transition — no separate skeleton screen
 
@@ -316,21 +367,23 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
         recipient: form.recipient, age: form.age, occasion: form.occasion, interests: form.interests,
         count: form.count, priceMin: form.priceMin, priceMax: form.priceMax,
         level: form.level, relatedness: form.relatedness, vibes: form.vibes ?? [],
-      });
+      }, abortRef.current.signal);
       if (slug) setPageSlug(slug);
       if (pinUrl) setPinImageUrl(pinUrl);
+      // Tell the reveal queue the stream is done; it settles once it drains.
+      streamDoneRef.current = true;
       if (emitted === 0 && !errored) {
+        stopReveal(); stopNarration(); setImagesSettled(true);
         devLog('[stream] 0 cards received — see the [error]/[anthropic] lines above');
         setError('Something went wrong. Please try again.');
         setStep(6);
       }
     } catch (err) {
+      if ((err as Error)?.name === 'AbortError') return; // superseded by a newer search
+      stopReveal(); stopNarration(); setImagesSettled(true);
       devLog(`[stream] aborted: ${err instanceof Error ? err.message : String(err)}`);
       setError('Network error. Please check your connection and try again.');
       setStep(6);
-    } finally {
-      setImagesSettled(true);
-      stopNarration();
     }
   }
 
@@ -343,6 +396,9 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
     setThemes([]);
     setImagesSettled(false);
     setProgress({ emitted: 0, target: resultForm.count });
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
+    startReveal();
     startNarration();
 
     try {
@@ -350,7 +406,8 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
         recipient: form.recipient, age: form.age, occasion: form.occasion, interests: form.interests,
         count: resultForm.count, priceMin: resultForm.priceMin, priceMax: resultForm.priceMax,
         level: resultForm.level, relatedness: resultForm.relatedness, vibes: resultForm.vibes ?? [],
-      });
+      }, abortRef.current.signal);
+      streamDoneRef.current = true; // reveal queue settles once it drains
       if (emitted > 0) {
         setCommittedLevel(resultForm.level);
         setCommittedCount(resultForm.count);
@@ -361,10 +418,11 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
         if (slug) setPageSlug(slug);
         if (pinUrl) setPinImageUrl(pinUrl);
       }
+    } catch (err) {
+      if ((err as Error)?.name === 'AbortError') { setRefreshing(false); return; }
+      stopReveal(); stopNarration(); setImagesSettled(true);
     } finally {
       setRefreshing(false);
-      setImagesSettled(true);
-      stopNarration();
     }
   }
 
