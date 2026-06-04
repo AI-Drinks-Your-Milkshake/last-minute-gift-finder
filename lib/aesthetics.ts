@@ -399,6 +399,20 @@ export const AESTHETICS: readonly Aesthetic[] = [
 
 export const AESTHETIC_VALUES = AESTHETICS.map((a) => a.value);
 
+// Vibes shown by default in the wizard/sidebar chip lists; the rest are
+// revealed behind a "Show all" toggle. Curated for broad, balanced coverage
+// (a mix of feminine-, masculine-, and neutral-leaning vibes) rather than
+// Pinterest search volume, so the default set fits most gift searches without
+// overwhelming the user. Keep this to ~6 for a clean two-row chip layout.
+export const FEATURED_VIBE_VALUES: readonly string[] = [
+  'cozy',
+  'aesthetic',
+  'outdoorsy',
+  'techy',
+  'classic',
+  'trendy',
+];
+
 // Subset used by the static-guide pipeline. Skip wizard-only vibes
 // (guideTier === null) so the parameter-matrix generator only iterates
 // over vibes intended for Pinterest publication.

@@ -9,9 +9,9 @@ import type { GiftTheme, GiftIdea, SearchFormData } from '@/types';
 import GiftThemeSection from './GiftThemeSection';
 import PinPreview from './PinPreview';
 import DevPanel, { clearDevLog } from './DevPanel';
-import { RECIPIENT_GROUPS } from '@/lib/recipients';
+import { RECIPIENT_GROUPS, COMMON_RECIPIENTS } from '@/lib/recipients';
 import { OCCASIONS } from '@/lib/occasions';
-import { AESTHETICS } from '@/lib/aesthetics';
+import { AESTHETICS, FEATURED_VIBE_VALUES } from '@/lib/aesthetics';
 import { selectThemesForDisplay, countGifts, flattenGifts } from '@/lib/select-gifts';
 
 const LEVELS: Array<{ value: SearchFormData['level']; label: string; desc: string }> = [
@@ -36,6 +36,16 @@ const COUNT_STEP = 1;
 const STEP_NAMES = ['Who', 'Age', 'Occasion', 'About them', 'Vibe', 'Adventurousness'];
 const TOTAL_STEPS = STEP_NAMES.length;
 const MAX_VIBES = 2;
+
+// Which vibe chips to render: the full list when expanded, otherwise the
+// featured subset plus any vibe the user has already selected (so a selected
+// chip never hides behind "Show all").
+function visibleAesthetics(selected: string[], showAll: boolean) {
+  if (showAll) return AESTHETICS;
+  return AESTHETICS.filter(
+    a => FEATURED_VIBE_VALUES.includes(a.value) || selected.includes(a.value),
+  );
+}
 
 const TAGLINE = 'As an Amazon Associate we earn from qualifying purchases.';
 
@@ -84,6 +94,11 @@ function StepWrap({ children }: { children: React.ReactNode }) {
 
 export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolean }) {
   const [step,           setStep]           = useState<WizardStep>(1);
+  // Vibe lists default to a featured subset; these reveal the full list.
+  const [showAllVibesStep,    setShowAllVibesStep]    = useState(false);
+  const [showAllVibesSidebar, setShowAllVibesSidebar] = useState(false);
+  // Who step defaults to a "Common" cluster; this reveals the full grouped list.
+  const [showAllRecipients,   setShowAllRecipients]   = useState(false);
   const [form,           setForm]           = useState<SearchFormData>(DEFAULT_FORM);
   const [themes,         setThemes]         = useState<GiftTheme[]>([]);
   const [error,          setError]          = useState<string | null>(null);
@@ -858,7 +873,7 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
             </span>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {AESTHETICS.map(a => {
+            {visibleAesthetics(resultForm.vibes ?? [], showAllVibesSidebar).map(a => {
               const selected = (resultForm.vibes ?? []).includes(a.value);
               const atCap = (resultForm.vibes ?? []).length >= MAX_VIBES && !selected;
               return (
@@ -890,6 +905,21 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
                 </button>
               );
             })}
+            <button
+              onClick={() => setShowAllVibesSidebar(v => !v)}
+              style={{
+                padding: '5px 11px', borderRadius: 16, fontSize: 12,
+                border: `1px dashed ${C.border}`,
+                background: 'transparent',
+                color: C.textMuted,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              {showAllVibesSidebar
+                ? 'Show fewer'
+                : `+ ${AESTHETICS.length - visibleAesthetics(resultForm.vibes ?? [], false).length} more`}
+            </button>
           </div>
         </div>
 
@@ -1225,16 +1255,40 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
       </h2>
       <p style={{ fontSize: 15, color: C.textSec, marginBottom: 28, lineHeight: 1.5 }}>Pick the closest relationship.</p>
       <div style={{ marginBottom: 36 }}>
-        {RECIPIENT_GROUPS.map((group) => (
-          <div key={group.id} style={{ marginBottom: 18 }}>
-            <p style={{
-              fontSize: 10, color: C.textMuted, letterSpacing: '0.08em',
-              textTransform: 'uppercase', marginBottom: 8,
-            }}>
-              {group.label}
-            </p>
+        {showAllRecipients ? (
+          // Full grouped list.
+          RECIPIENT_GROUPS.map((group) => (
+            <div key={group.id} style={{ marginBottom: 18 }}>
+              <p style={{
+                fontSize: 10, color: C.textMuted, letterSpacing: '0.08em',
+                textTransform: 'uppercase', marginBottom: 8,
+              }}>
+                {group.label}
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {group.recipients.map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => update('recipient', r)}
+                    onDoubleClick={() => { update('recipient', r); setStep(2); }}
+                    style={chipStyle(form.recipient === r)}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))
+        ) : (
+          // Collapsed: a single "Common" cluster. Include the currently-selected
+          // recipient even if it isn't in the common set, so the choice stays
+          // visible without expanding.
+          <div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {group.recipients.map((r) => (
+              {[
+                ...COMMON_RECIPIENTS,
+                ...(form.recipient && !COMMON_RECIPIENTS.includes(form.recipient) ? [form.recipient] : []),
+              ].map((r) => (
                 <button
                   key={r}
                   onClick={() => update('recipient', r)}
@@ -1246,7 +1300,19 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
               ))}
             </div>
           </div>
-        ))}
+        )}
+        <button
+          onClick={() => setShowAllRecipients(v => !v)}
+          style={{
+            ...chipStyle(false),
+            marginTop: 14,
+            background: 'transparent',
+            borderStyle: 'dashed',
+            color: C.textMuted,
+          }}
+        >
+          {showAllRecipients ? 'Show fewer' : 'More people…'}
+        </button>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
         <button onClick={() => { window.location.href = '/'; }} style={backBtn}>← Back</button>
@@ -1382,7 +1448,7 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
         Helps anchor the recommendations toward a specific look or feel. Skip if you&apos;re not sure.
       </p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 28, maxWidth: 520 }}>
-        {AESTHETICS.map(a => {
+        {visibleAesthetics(form.vibes ?? [], showAllVibesStep).map(a => {
           const selected = (form.vibes ?? []).includes(a.value);
           const atCap = (form.vibes ?? []).length >= MAX_VIBES && !selected;
           return (
@@ -1401,6 +1467,19 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
             </button>
           );
         })}
+        <button
+          onClick={() => setShowAllVibesStep(v => !v)}
+          style={{
+            ...chipStyle(false),
+            background: 'transparent',
+            borderStyle: 'dashed',
+            color: C.textMuted,
+          }}
+        >
+          {showAllVibesStep
+            ? 'Show fewer'
+            : `+ ${AESTHETICS.length - visibleAesthetics(form.vibes ?? [], false).length} more`}
+        </button>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
         <button onClick={() => setStep(4)} style={backBtn}>← Back</button>
