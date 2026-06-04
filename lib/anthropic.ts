@@ -488,3 +488,156 @@ Output only the 3 JSON lines. No other text, no markdown, no outer wrapper.`;
     params.onLog?.(`[anthropic] 0 themes parsed — raw sample: ${buf.slice(0, 400).replace(/\s+/g, ' ').trim()}`);
   }
 }
+
+// ── Per-gift streaming variant ───────────────────────────────────────────────
+//
+// Same generation, but the model emits ONE GIFT PER LINE (flat NDJSON), each
+// line tagged with its theme. Because each top-level object is now a single
+// gift (not a whole theme), the brace parser yields the FIRST gift in ~3-4s
+// instead of waiting ~15s for an 18-gift theme to finish. The route looks up
+// each gift's image as it arrives, so a complete card can land in ~5-7s.
+
+export interface StreamedGift {
+  themeId: string;
+  themeLabel: string;
+  relatednessLevel: 1 | 2 | 3;
+  gift: GiftIdea;
+}
+
+function parseStreamedGift(slice: string): StreamedGift | null {
+  let parsed: unknown;
+  try { parsed = JSON.parse(slice); } catch { return null; }
+  if (!parsed || typeof parsed !== 'object') return null;
+  const x = parsed as Record<string, unknown>;
+  const gift = normalizeGift(x);
+  if (!gift) return null;
+  const themeId    = typeof x.theme === 'string' && x.theme.trim() ? x.theme.trim() : 'direct';
+  const themeLabel = typeof x.label === 'string' && x.label.trim() ? x.label.trim() : themeId;
+  let lvl: unknown = x.level;
+  if (typeof lvl === 'string') lvl = Number(lvl);
+  const relatednessLevel = (lvl === 1 || lvl === 2 || lvl === 3 ? lvl : 1) as 1 | 2 | 3;
+  return { themeId, themeLabel, relatednessLevel, gift };
+}
+
+export async function* streamGifts(
+  params: GetGiftIdeasParams,
+): AsyncGenerator<StreamedGift> {
+  const today = new Date().toISOString().slice(0, 10);
+  const voiceOverlay = voiceOverlayFor(params.recipient);
+  const aestheticFragment = aestheticPromptFragment(params.vibes ?? []);
+  const trendingFragment =
+    params.trendingProducts && params.trendingProducts.length > 0
+      ? `\nCurrently-trending product names that surfaced in recent gift round-ups (use only as inspiration; recommend a specific one only if it actually fits this recipient):\n${params.trendingProducts.map((p) => `- ${p}`).join('\n')}\n`
+      : '';
+
+  const systemPrompt = `You are a premium gift concierge who specializes in finding specific, exciting, high-quality gifts. You think like a personal shopper who knows exactly what someone will love. Output ONLY valid NDJSON — one complete JSON object per line, each describing a SINGLE gift. No outer array, no wrapper key, no markdown, no code fences.
+
+Today's date is ${today}. If you recommend a specific product, prefer items that are likely still in production and on retail shelves as of this date.${voiceOverlay ? '\n\n' + voiceOverlay : ''}`;
+
+  const [t1, t2, t3] = themeDistribution(params.count, params.relatedness);
+  const total = t1 + t2 + t3;
+
+  const aboutLine = params.interests?.trim()
+    ? `About them: ${params.interests}`
+    : `About them: No specific interests provided — infer broadly popular gift ideas for a ${params.recipient} aged ${params.age}.`;
+
+  const userPrompt = `Generate ${total} gift ideas for:
+
+Recipient: ${params.recipient} (${params.age} years old)
+Occasion: ${params.occasion}
+${aboutLine}
+
+${levelInstruction(params.level)}
+${priceInstruction(params.priceMin, params.priceMax)}
+${aestheticFragment ? '\n' + aestheticFragment + '\n' : ''}${trendingFragment}
+Organize the gifts into 3 distinct themes and output them IN THIS ORDER (all of theme 1, then all of theme 2, then all of theme 3):
+- Theme 1 (level 1) — the direct interest itself. Exactly ${t1} gift(s).
+- Theme 2 (level 2) — an adjacent activity or value. Exactly ${t2} gift(s).
+- Theme 3 (level 3) — a broader lifestyle dimension. Exactly ${t3} gift(s).
+All three themes are required and distinct — never merge or skip a theme.
+
+Output ${total} lines — ONE gift per line, each a complete JSON object, in the order above. Each line MUST have:
+- "theme": a short slug for the gift's theme; use the SAME value for every gift in that theme (e.g. "direct", "adjacent", "lifestyle")
+- "label": the theme's display label; SAME for every gift in that theme — "For [interest] fans" style for theme 1, "Since they like [dimension]" style for themes 2-3
+- "level": 1, 2, or 3 (the theme's relatedness level)
+- "title": specific product name (e.g. "Oura Ring Gen 3" not "fitness tracker")
+- "description": exactly 1 sentence on what they'd do with it. Avoid "perfect", "thoughtful", "loves".
+- "priceRange": formatted as "$X–$Y"
+- "priceMin": lower bound as a NUMBER (no $ sign, no quotes, no commas)
+- "priceMax": upper bound as a NUMBER (no $ sign, no quotes, no commas)
+- "searchTerms": 3–6 words optimized for Amazon product search
+
+Output only the ${total} JSON lines. No other text, no markdown, no outer wrapper.`;
+
+  params.onLog?.(
+    `[anthropic] key configured: ${Boolean(process.env.ANTHROPIC_API_KEY)} · model ${params.model ?? MODEL} · streaming ${total} gifts (${t1}+${t2}+${t3})`,
+  );
+
+  let stream;
+  try {
+    stream = await anthropic.messages.create(
+      {
+        model: params.model ?? MODEL,
+        max_tokens: 8000,
+        temperature: 0.85,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        stream: true,
+      },
+      { maxRetries: 1 },
+    );
+  } catch (err) {
+    const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    params.onLog?.(`[anthropic] create() failed: ${detail}`);
+    console.error('[anthropic] streamGifts create() failed:', err);
+    throw err;
+  }
+  params.onLog?.('[anthropic] stream opened — awaiting first gift');
+
+  // Brace-depth incremental parse: each closed top-level object is one gift.
+  let buf = '';
+  let scan = 0, depth = 0, objStart = -1;
+  let inStr = false, esc = false;
+  let count = 0;
+
+  function drain(): StreamedGift[] {
+    const ready: StreamedGift[] = [];
+    for (; scan < buf.length; scan++) {
+      const ch = buf[scan];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (ch === '\\') esc = true;
+        else if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') { inStr = true; continue; }
+      if (ch === '{') { if (depth === 0) objStart = scan; depth++; }
+      else if (ch === '}') {
+        if (depth > 0) depth--;
+        if (depth === 0 && objStart >= 0) {
+          const g = parseStreamedGift(buf.slice(objStart, scan + 1));
+          if (g) ready.push(g);
+          objStart = -1;
+        }
+      }
+    }
+    return ready;
+  }
+
+  let sawFirst = false;
+  for await (const chunk of stream) {
+    if (chunk.type !== 'content_block_delta') continue;
+    if (chunk.delta.type !== 'text_delta') continue;
+    buf += chunk.delta.text;
+    for (const g of drain()) {
+      if (!sawFirst) { sawFirst = true; params.onLog?.('[anthropic] first gift parsed'); }
+      count++;
+      yield g;
+    }
+  }
+  for (const g of drain()) { count++; yield g; }
+
+  if (count === 0) {
+    params.onLog?.(`[anthropic] 0 gifts parsed — raw sample: ${buf.slice(0, 400).replace(/\s+/g, ' ').trim()}`);
+  }
+}
