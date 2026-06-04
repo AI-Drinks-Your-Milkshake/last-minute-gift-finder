@@ -163,11 +163,12 @@ export async function POST(request: NextRequest) {
           new Promise<string[]>((resolve) => setTimeout(() => resolve([]), TRENDS_TIMEOUT_MS)),
         ]);
 
-        // Generate a generous spare margin so image-lookup failures can be
-        // backfilled WITHOUT a second model call. Generation is cheap (~output
-        // tokens only) and we only image-lookup what we display, so extra gifts
-        // here cost almost nothing. Cap at 50 to stay well under max_tokens.
-        const bufferedCount = Math.min(50, count + Math.max(4, Math.ceil(count * 0.15)));
+        // Generate a generous spare margin so image-lookup failures (and the
+        // occasional under-filled/dropped theme) can be backfilled WITHOUT a
+        // second model call. Generation is cheap (~output tokens only) and we
+        // only image-lookup what we display, so extra gifts here cost almost
+        // nothing. Cap at 50 to stay well under max_tokens.
+        const bufferedCount = Math.min(50, count + Math.max(5, Math.ceil(count * 0.30)));
 
         const themes: GiftTheme[] = [];
 

@@ -213,10 +213,10 @@ ${aboutLine}
 ${levelInstruction(params.level)}
 ${priceInstruction(params.priceMin, params.priceMax)}
 ${aestheticFragment ? '\n' + aestheticFragment + '\n' : ''}${trendingFragment}
-Step 1 — Identify 3 thematic dimensions from this person's interests:
-- Theme 1: The direct interest itself (e.g. "e-scooters")
-- Theme 2: An adjacent activity or value this interest suggests (e.g. "micromobility" or "urban commuting")
-- Theme 3: A broader lifestyle dimension (e.g. "exploring" or "being outdoors")
+Step 1 — You MUST output exactly 3 distinct themes. They are separate dimensions and must never be merged or skipped — even if two feel similar, emit all three as their own objects with relatednessLevel 1, 2, and 3 respectively:
+- Theme 1 (relatednessLevel 1): The direct interest itself (e.g. "e-scooters")
+- Theme 2 (relatednessLevel 2): An adjacent activity or value this interest suggests (e.g. "micromobility" or "urban commuting")
+- Theme 3 (relatednessLevel 3): A broader lifestyle dimension (e.g. "exploring" or "being outdoors")
 
 Step 2 — Generate gifts organized by these themes. Use EXACTLY these gift counts per theme:
 - Theme 1: exactly ${t1Count} gift(s)
@@ -343,10 +343,10 @@ ${aboutLine}
 ${levelInstruction(params.level)}
 ${priceInstruction(params.priceMin, params.priceMax)}
 ${aestheticFragment ? '\n' + aestheticFragment + '\n' : ''}${trendingFragment}
-Step 1 — Identify 3 thematic dimensions from this person's interests:
-- Theme 1: The direct interest itself (e.g. "e-scooters")
-- Theme 2: An adjacent activity or value this interest suggests (e.g. "micromobility" or "urban commuting")
-- Theme 3: A broader lifestyle dimension (e.g. "exploring" or "being outdoors")
+Step 1 — You MUST output exactly 3 distinct themes. They are separate dimensions and must never be merged or skipped — even if two feel similar, emit all three as their own objects with relatednessLevel 1, 2, and 3 respectively:
+- Theme 1 (relatednessLevel 1): The direct interest itself (e.g. "e-scooters")
+- Theme 2 (relatednessLevel 2): An adjacent activity or value this interest suggests (e.g. "micromobility" or "urban commuting")
+- Theme 3 (relatednessLevel 3): A broader lifestyle dimension (e.g. "exploring" or "being outdoors")
 
 Step 2 — Generate gifts organized by these themes. Use EXACTLY these gift counts per theme:
 - Theme 1: exactly ${t1Count} gift(s)
@@ -354,7 +354,7 @@ Step 2 — Generate gifts organized by these themes. Use EXACTLY these gift coun
 - Theme 3: exactly ${t3Count} gift(s)
 Total: ${totalCount} gifts. Do not add or remove gifts from these counts.
 
-Output EXACTLY 3 lines — one complete JSON object per line, no outer array or wrapper key. Each theme JSON object must have:
+Output EXACTLY 3 lines — one complete JSON object per line (one per theme: relatednessLevel 1, then 2, then 3 — all three are required; never omit or merge a theme), no outer array or wrapper key. Each theme JSON object must have:
 - "id": a short slug (e.g. "direct", "micromobility", "exploring") — must be unique across themes
 - "label": display text — for theme 1 use "For [interest] fans" style, for themes 2-3 use "Since they like [theme dimension]" style
 - "relatednessLevel": 1 for theme 1, 2 for theme 2, 3 for theme 3
