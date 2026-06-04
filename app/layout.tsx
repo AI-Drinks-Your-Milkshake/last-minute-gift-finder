@@ -5,11 +5,11 @@ import './globals.css';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Strix',
-  description: 'AI-powered gift ideas tailored to any person, any occasion — in seconds.',
+  title: 'LastMinuteGiftFinder — Last-minute gift, found fast.',
+  description: 'Specific, thoughtful gift ideas in under a minute — personalized by interest, occasion, and vibe, on Amazon and ready to ship fast. Built for anyone too busy to shop.',
   openGraph: {
-    title: 'Strix',
-    description: 'AI-powered gift ideas tailored to any person, any occasion — in seconds.',
+    title: 'LastMinuteGiftFinder — Last-minute gift, found fast.',
+    description: 'Specific, thoughtful gift ideas in under a minute — personalized by interest, occasion, and vibe, on Amazon and ready to ship fast.',
     type: 'website',
   },
 };

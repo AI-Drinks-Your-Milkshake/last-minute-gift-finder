@@ -1,10 +1,10 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Strix',
+  title: 'LastMinuteGiftFinder',
   description: 'AI-powered gift ideas tailored to any person, any occasion — in seconds.',
   openGraph: {
-    title: 'Strix',
+    title: 'LastMinuteGiftFinder',
     description: 'AI-powered gift ideas tailored to any person, any occasion — in seconds.',
     type: 'website',
   },

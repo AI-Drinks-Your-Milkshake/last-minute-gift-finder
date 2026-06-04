@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
       await addSignup(normalized);
     } else {
       // Dev fallback when KV isn't wired up — keeps local dev unblocked.
-      console.log(`[Strix Beta] (no KV) signup: ${normalized} at ${new Date().toISOString()}`);
+      console.log(`[LastMinuteGiftFinder Beta] (no KV) signup: ${normalized} at ${new Date().toISOString()}`);
     }
 
     return NextResponse.json({ ok: true });

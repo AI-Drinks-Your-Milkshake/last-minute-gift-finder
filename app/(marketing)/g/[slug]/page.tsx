@@ -5,7 +5,7 @@
 // The slug is generated server-side in route.ts from the pin title formula
 // and stored in KV alongside the full search results. This page reads from
 // KV and renders the same gift grid the in-app results panel uses, wrapped
-// in a minimal Strix chrome (nav + footer). No wizard, no sidebars — just
+// in a minimal LastMinuteGiftFinder chrome (nav + footer). No wizard, no sidebars — just
 // the results, clean and shareable.
 //
 // This is the page a Pinterest pin would link to. Design is intentionally
@@ -26,10 +26,10 @@ interface Props {
 // Generate <title> and OG tags from the stored page data.
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const page = await getPageResult(params.slug);
-  if (!page) return { title: 'Gift Guide · Strix' };
+  if (!page) return { title: 'Gift Guide · LastMinuteGiftFinder' };
 
   return {
-    title: `${page.title} · Strix`,
+    title: `${page.title} · LastMinuteGiftFinder`,
     description: `Curated gift ideas: ${page.title}. AI-powered recommendations tailored to the recipient.`,
     openGraph: {
       title: page.title,
@@ -104,7 +104,7 @@ export default async function GiftGuidePage({ params }: Props) {
             textDecoration: 'none',
           }}
         >
-          <span style={{ color: C.accent }}>✦</span> Strix
+          <span style={{ color: C.accent }}>✦</span> LastMinuteGiftFinder
         </a>
         <a
           href="/app"
@@ -178,7 +178,7 @@ export default async function GiftGuidePage({ params }: Props) {
         <p style={{ fontSize: 12, color: C.textMuted, margin: 0 }}>
           Powered by Claude AI ·{' '}
           <a href="/app" style={{ color: C.textSec, textDecoration: 'none' }}>
-            Find your own gift ideas at Strix
+            Find your own gift ideas at LastMinuteGiftFinder
           </a>
           {' · '}
           Amazon links may include affiliate tags

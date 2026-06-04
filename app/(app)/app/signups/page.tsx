@@ -43,7 +43,7 @@ export default async function SignupsPage() {
         {/* Header */}
         <div style={{ marginBottom: 40 }}>
           <p style={{ fontSize: 11, color: C.textMuted, letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>
-            <span style={{ color: C.accent }}>✦</span> Strix · Admin
+            <span style={{ color: C.accent }}>✦</span> LastMinuteGiftFinder · Admin
           </p>
           <h1 style={{ fontSize: 28, fontWeight: 500, color: C.textPri, lineHeight: 1.2, margin: 0 }}>
             Beta signups

@@ -56,7 +56,7 @@ function LoginForm() {
         {/* Logo */}
         <div style={{ marginBottom: 48 }}>
           <p style={{ fontSize: 24, fontWeight: 600, color: C.textPri, letterSpacing: '-0.02em' }}>
-            <span style={{ color: C.accent }}>✦</span> Strix
+            <span style={{ color: C.accent }}>✦</span> LastMinuteGiftFinder
           </p>
         </div>
 
@@ -64,7 +64,7 @@ function LoginForm() {
           Sign in
         </h1>
         <p style={{ fontSize: 15, color: C.textSec, marginBottom: 36, lineHeight: 1.5 }}>
-          Enter your credentials to access Strix.
+          Enter your credentials to access LastMinuteGiftFinder.
         </p>
 
         <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -113,11 +113,6 @@ function LoginForm() {
           </button>
         </form>
 
-        <p style={{
-          fontSize: 11, color: C.textMuted, lineHeight: 1.6, fontStyle: 'italic', marginTop: 64,
-        }}>
-          Strix. n. Owl genus. Large eyes, binocular vision, sharp in the dark.
-        </p>
       </div>
     </div>
   );

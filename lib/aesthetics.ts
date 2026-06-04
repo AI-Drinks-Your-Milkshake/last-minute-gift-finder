@@ -93,7 +93,7 @@ export const AESTHETICS: readonly Aesthetic[] = [
     guideTier: 'LAUNCH',
     evidence: 'Broad catch-all; high volume but lower conversion than sub-aesthetics.',
     cssOverrides: {
-      '--accent': '#E8724A', // existing Strix orange
+      '--accent': '#E8724A', // brand orange
       '--pin-bg': '#F2EEE9',
       '--pin-text': '#1F1F2A',
       '--pin-text-soft': '#6F6F80',

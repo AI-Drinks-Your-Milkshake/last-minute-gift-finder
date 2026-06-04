@@ -12,7 +12,7 @@
 //     vibe, just the page title (no eyebrow).
 //   • Bottom product zone (≈ half remaining height) — same brick grid,
 //     continuing the aspect-ratio sequence from the top.
-//   • Strix mark in bottom-right (small, low opacity).
+//   • No brand watermark — pins are left unbranded.
 //
 // Theming: the active vibe's `cssOverrides` are inlined as CSS custom
 // properties on the [data-pin-root] element. Product zones are always
@@ -67,8 +67,8 @@ const COL_W  = (ZONE_W - GRID_GAP * (NUM_COLUMNS - 1)) / NUM_COLUMNS;
 // product zone an extra ~30px of vertical room.
 const BAND_H = 160;
 
-// Reserve a strip at the very bottom of the bottom zone for the strix.com
-// watermark so it never overlaps a product image in the rightmost column.
+// Reserve a small strip at the very bottom of the bottom zone as breathing
+// room so products never sit flush against the pin's bottom edge.
 const WATERMARK_RESERVED = 36;
 
 const ZONE_OUTER_H    = (PIN_HEIGHT - BAND_H) / 2;
@@ -218,25 +218,6 @@ export default function PinTemplate({ title, vibe, products }: Props) {
       {/* ── Bottom product zone ───────────────────────────── */}
       <ProductGrid products={bottom} placement="bottom" indexOffset={top.length} zoneInnerH={BOT_ZONE_INNER} />
 
-      {/* ── Strix watermark ─────────────────────────────── */}
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 14,
-          right: 24,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          fontSize: 16,
-          fontWeight: 600,
-          letterSpacing: '0.04em',
-          color: 'rgba(80, 80, 100, 0.75)',
-          opacity: 0.9,
-        }}
-      >
-        <span style={{ color: 'var(--pin-accent, var(--accent))' }}>✦</span>
-        <span>strix.com</span>
-      </div>
     </div>
   );
 }
