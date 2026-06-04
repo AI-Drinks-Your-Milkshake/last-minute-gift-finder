@@ -83,7 +83,7 @@ function StepWrap({ children }: { children: React.ReactNode }) {
 // ── Main component ─────────────────────────────────────────────────────────
 
 export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolean }) {
-  const [step,           setStep]           = useState<WizardStep>(0);
+  const [step,           setStep]           = useState<WizardStep>(1);
   const [form,           setForm]           = useState<SearchFormData>(DEFAULT_FORM);
   const [themes,         setThemes]         = useState<GiftTheme[]>([]);
   const [error,          setError]          = useState<string | null>(null);
@@ -1225,7 +1225,7 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
         ))}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-        <button onClick={() => setStep(0)} style={backBtn}>← Back</button>
+        <button onClick={() => { window.location.href = '/'; }} style={backBtn}>← Back</button>
         <button onClick={() => { if (form.recipient) setStep(2); }} disabled={!form.recipient} style={continueBtn(!!form.recipient)}>
           Continue
         </button>

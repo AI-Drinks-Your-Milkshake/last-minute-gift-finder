@@ -36,11 +36,14 @@ const css = `
 .lp-finder{max-width:520px;margin:28px auto 0;background:var(--surface);
   border:1px solid var(--border);border-radius:16px;padding:20px;text-align:left;}
 .lp-field{margin-bottom:12px;}
+.lp-frow{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.lp-frow2{display:flex;gap:12px;align-items:flex-end;}
+.lp-frow2 .lp-field{flex:1;margin-bottom:0;}
 .lp-field label{display:block;font-size:12.5px;color:var(--text-secondary);margin-bottom:5px;}
 .lp-val{background:var(--surface-card);border:1px solid var(--border);border-radius:10px;
   padding:11px 13px;font-size:14px;display:flex;align-items:center;justify-content:space-between;color:var(--text-primary);}
 .lp-val .lp-ic{color:var(--text-muted);font-size:16px;}
-.lp-finder .lp-btn{width:100%;justify-content:center;padding:13px;font-size:15px;margin-top:4px;}
+.lp-btn-find{padding:12px 22px;font-size:15px;white-space:nowrap;}
 .lp-trust{text-align:center;font-size:12.5px;color:var(--text-muted);margin-top:14px;
   display:flex;gap:14px;justify-content:center;flex-wrap:wrap;}
 .lp-trust .lp-ic{font-size:14px;}
@@ -53,9 +56,9 @@ const css = `
 
 .lp-grid-products{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));}
 .lp-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;}
-.lp-thumb{aspect-ratio:1/1;background:var(--surface-card);border-radius:10px;display:flex;
-  align-items:center;justify-content:center;margin-bottom:12px;}
-.lp-thumb .lp-ic{font-size:42px;color:var(--text-muted);}
+.lp-thumb{aspect-ratio:1/1;background:#fff;border-radius:10px;display:flex;
+  align-items:center;justify-content:center;margin-bottom:12px;overflow:hidden;}
+.lp-thumb img{max-width:84%;max-height:84%;object-fit:contain;}
 .lp-pname{font-size:14px;font-weight:500;margin-bottom:6px;}
 .lp-prow{display:flex;align-items:center;gap:8px;margin-bottom:9px;}
 .lp-price{font-size:13px;color:var(--text-secondary);}
@@ -92,6 +95,9 @@ const css = `
   .lp-finder{padding:16px;}
   .lp-nav{height:54px;}
   .lp-signin{display:none;}
+  .lp-frow{grid-template-columns:1fr;}
+  .lp-frow2{flex-direction:column;align-items:stretch;}
+  .lp-btn-find{width:100%;justify-content:center;}
 }
 `;
 
@@ -136,22 +142,26 @@ export default function HomePage() {
           </p>
 
           <div className="lp-finder">
-            <div className="lp-field">
-              <label>What is it for?</label>
-              <div className="lp-val">my brother&apos;s 30th birthday</div>
-            </div>
-            <div className="lp-field">
-              <label>What are they into?</label>
-              <div className="lp-val">gaming, gadgets, cycling</div>
-            </div>
-            <div className="lp-field">
-              <label>What&apos;s their vibe?</label>
-              <div className="lp-val">
-                techy &amp; minimalist
-                <svg className="lp-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 4.3L18 9l-4.1 1.7L12 15l-1.9-4.3L6 9l4.1-1.7z" /></svg>
+            <div className="lp-frow">
+              <div className="lp-field">
+                <label>What is it for?</label>
+                <div className="lp-val">my brother&apos;s 30th birthday</div>
+              </div>
+              <div className="lp-field">
+                <label>What are they into?</label>
+                <div className="lp-val">gaming, gadgets, cycling</div>
               </div>
             </div>
-            <Link className="lp-btn" href="/app">Find the gift <ArrowIcon /></Link>
+            <div className="lp-frow2">
+              <div className="lp-field">
+                <label>What&apos;s their vibe?</label>
+                <div className="lp-val">
+                  techy &amp; minimalist
+                  <svg className="lp-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 4.3L18 9l-4.1 1.7L12 15l-1.9-4.3L6 9l4.1-1.7z" /></svg>
+                </div>
+              </div>
+              <Link className="lp-btn lp-btn-find" href="/app">Find the gift <ArrowIcon /></Link>
+            </div>
             <div className="lp-trust">
               <span><svg className="lp-ic b" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L3 14h7l-1 8 10-12h-7z" /></svg> A great idea in 30 seconds</span>
               <span><TruckIcon /> Picks that arrive in time</span>
@@ -164,25 +174,25 @@ export default function HomePage() {
           <div className="lp-grid-products">
 
             <div className="lp-card">
-              <div className="lp-thumb"><svg className="lp-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13v-1a8 8 0 0 1 16 0v1" /><path d="M4 14a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2 1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1z" /><path d="M20 14a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2 1 1 0 0 0 1-1v-4a1 1 0 0 0-1-1z" /></svg></div>
-              <div className="lp-pname">Anker Soundcore Q45</div>
-              <div className="lp-prow"><span className="lp-price">$99&ndash;$129</span><span className="lp-tag lp-tag-mid">Mid-range</span></div>
+              <div className="lp-thumb"><img src="https://m.media-amazon.com/images/I/61KVX-MbIUL.jpg" alt="Samsung Galaxy Buds2 Pro" loading="lazy" referrerPolicy="no-referrer" /></div>
+              <div className="lp-pname">Samsung Galaxy Buds2 Pro</div>
+              <div className="lp-prow"><span className="lp-price">$169&ndash;$199</span><span className="lp-tag lp-tag-mid">Mid-range</span></div>
               <div className="lp-ship"><TruckIcon /> Arrives by tomorrow</div>
               <Link className="lp-buy" href="/app">Buy on Amazon &#8599;</Link>
             </div>
 
             <div className="lp-card">
-              <div className="lp-thumb"><svg className="lp-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 11h4M8 9v4" /><circle cx="15.5" cy="11" r="1" /><circle cx="17.5" cy="13" r="1" /><path d="M7 7h10a4 4 0 0 1 4 4l-1 5a2.5 2.5 0 0 1-4.3 1.3L13 16h-2l-2.7 2.3A2.5 2.5 0 0 1 4 17l-1-6a4 4 0 0 1 4-4z" /></svg></div>
-              <div className="lp-pname">PS5 Controller &mdash; Galactic Purple</div>
-              <div className="lp-prow"><span className="lp-price">$74&ndash;$84</span><span className="lp-tag lp-tag-bud">Budget pick</span></div>
+              <div className="lp-thumb"><img src="https://m.media-amazon.com/images/I/61Syl8a3uwL._AC_UF894,1000_QL80_.jpg" alt="Razer DeathAdder V3 gaming mouse" loading="lazy" referrerPolicy="no-referrer" /></div>
+              <div className="lp-pname">Razer DeathAdder V3</div>
+              <div className="lp-prow"><span className="lp-price">$59&ndash;$79</span><span className="lp-tag lp-tag-bud">Budget pick</span></div>
               <div className="lp-ship"><TruckIcon /> Arrives by tomorrow</div>
               <Link className="lp-buy" href="/app">Buy on Amazon &#8599;</Link>
             </div>
 
             <div className="lp-card">
-              <div className="lp-thumb"><svg className="lp-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="17" r="3" /><circle cx="18" cy="17" r="3" /><path d="M6 17l4-9h5l3 9M10 8l2 5h6" /></svg></div>
-              <div className="lp-pname">Lezyne Mega XL GPS Computer</div>
-              <div className="lp-prow"><span className="lp-price">$199&ndash;$229</span><span className="lp-tag lp-tag-spl">Splurge</span></div>
+              <div className="lp-thumb"><img src="https://m.media-amazon.com/images/I/61-SGpdmgRL._AC_UF1000,1000_QL80_.jpg" alt="Meta Quest 3S VR headset" loading="lazy" referrerPolicy="no-referrer" /></div>
+              <div className="lp-pname">Meta Quest 3S (128GB)</div>
+              <div className="lp-prow"><span className="lp-price">$299&ndash;$329</span><span className="lp-tag lp-tag-spl">Splurge</span></div>
               <div className="lp-ship"><TruckIcon /> Arrives by tomorrow</div>
               <Link className="lp-buy" href="/app">Buy on Amazon &#8599;</Link>
             </div>
@@ -219,7 +229,6 @@ export default function HomePage() {
         <section className="lp-section">
           <div className="lp-cta">
             <h2 className="lp-h2">Find their gift in under a minute</h2>
-            <p>Six quick taps &mdash; who it&apos;s for, what they&apos;re into, their vibe &mdash; and you&apos;ve got specific ideas ready to buy.</p>
             <Link className="lp-btn" href="/app">Get started <ArrowIcon /></Link>
           </div>
         </section>
