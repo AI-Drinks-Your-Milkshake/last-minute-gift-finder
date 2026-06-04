@@ -108,6 +108,10 @@ export async function POST(request: NextRequest) {
 
       const ceiling = eligibleCeiling(relatedness);
       const target = count;
+      // Generate a generous spare margin (cheap output tokens) so image-lookup
+      // misses can be backfilled and we still hit exactly `count`. We only look
+      // up images for what we emit, so the extras cost ~nothing in image queries.
+      const bufferedCount = Math.min(50, count + Math.max(5, Math.ceil(count * 0.30)));
 
       // ── Ordered streaming + lazy windowed image lookup ──────────────────
       interface Slot { sg: StreamedGift; settled: boolean; url: string | null }
@@ -233,7 +237,7 @@ export async function POST(request: NextRequest) {
 
         for await (const sg of streamGifts({
           recipient, age, occasion, interests,
-          count, priceMin, priceMax, level, relatedness, vibes,
+          count: bufferedCount, priceMin, priceMax, level, relatedness, vibes,
           trendingProducts, model: MODEL,
           onLog: (msg) => emit({ type: 'log', msg }),
         })) {
