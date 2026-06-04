@@ -36,6 +36,20 @@ function siteUrl(): string {
 }
 
 export async function GET(request: NextRequest) {
+  // Admin-only: pin images are part of the Pinterest workflow, which is gated
+  // to the operator (logged in with the shared password). When AUTH_TOKEN is
+  // set, require a matching strix-session cookie; unset = dev, allow through.
+  const authToken = process.env.AUTH_TOKEN;
+  if (authToken) {
+    const session = request.cookies.get('strix-session')?.value ?? '';
+    if (session !== authToken) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized.' }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+  }
+
   const accessKey = process.env.SCREENSHOTONE_ACCESS_KEY;
   if (!accessKey) {
     return new Response(

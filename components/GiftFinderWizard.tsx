@@ -82,7 +82,7 @@ function StepWrap({ children }: { children: React.ReactNode }) {
 
 // ── Main component ─────────────────────────────────────────────────────────
 
-export default function GiftFinderWizard() {
+export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolean }) {
   const [step,           setStep]           = useState<WizardStep>(0);
   const [form,           setForm]           = useState<SearchFormData>(DEFAULT_FORM);
   const [themes,         setThemes]         = useState<GiftTheme[]>([]);
@@ -101,6 +101,8 @@ export default function GiftFinderWizard() {
   // Gates the published-count surface logs, since with lazy enrichment many
   // gifts intentionally stay un-looked-up (undefined) and never resolve.
   const [imagesSettled,       setImagesSettled]       = useState(false);
+  // Transient hint shown after the (MVP no-op) "Save this person" button.
+  const [saveHinted,          setSaveHinted]          = useState(false);
 
   // We run a single model (Haiku). If a stale ?model= param is in the URL
   // (e.g. a saved tab from when the model toggle existed), strip it so the
@@ -170,6 +172,12 @@ export default function GiftFinderWizard() {
     setPageSlug(null);
     setPinImageUrl(null);
     setStep(1);
+  }
+
+  async function handleLogout() {
+    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
+    // Full reload so the server recomputes isAdmin (cookie is now cleared).
+    window.location.href = '/app';
   }
 
   // ── Lazy image loader ──
@@ -590,15 +598,35 @@ export default function GiftFinderWizard() {
         </div>
       )}
 
-      {(step === 'results' || step === 'loading') && (
-        <button onClick={resetSearch} style={{
-          background: 'none', border: `1px solid ${C.border}`,
-          borderRadius: 20, padding: '4px 12px',
-          fontSize: 12, color: C.textMuted, cursor: 'pointer', fontFamily: 'inherit',
-        }}>
-          New search
-        </button>
-      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {(step === 'results' || step === 'loading') && (
+          <button onClick={resetSearch} style={{
+            background: 'none', border: `1px solid ${C.border}`,
+            borderRadius: 20, padding: '4px 12px',
+            fontSize: 12, color: C.textMuted, cursor: 'pointer', fontFamily: 'inherit',
+          }}>
+            New search
+          </button>
+        )}
+        {isAdmin ? (
+          <button onClick={handleLogout} style={{
+            background: 'none', border: `1px solid ${C.border}`,
+            borderRadius: 20, padding: '4px 12px',
+            fontSize: 12, color: C.textMuted, cursor: 'pointer', fontFamily: 'inherit',
+          }}>
+            Log out
+          </button>
+        ) : (
+          <a href="/app/login" style={{
+            background: 'none', border: `1px solid ${C.border}`,
+            borderRadius: 20, padding: '4px 12px',
+            fontSize: 12, color: C.textMuted, cursor: 'pointer', fontFamily: 'inherit',
+            textDecoration: 'none', display: 'inline-block',
+          }}>
+            Log in
+          </a>
+        )}
+      </div>
     </nav>
   );
 
@@ -717,6 +745,27 @@ export default function GiftFinderWizard() {
             </div>
           )}
         </div>
+
+        {/* Save this person — MVP placeholder (intentionally no-op). Reserves
+            the spot + intent for the upcoming saved-profile feature. */}
+        <button
+          onClick={() => setSaveHinted(true)}
+          style={{
+            width: '100%', background: C.surface, color: C.textSec,
+            border: `1px solid ${C.border}`, borderRadius: 10,
+            padding: '10px 14px', fontSize: 12, fontWeight: 500,
+            cursor: 'pointer', fontFamily: 'inherit',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            marginBottom: saveHinted ? 8 : 20,
+          }}
+        >
+          ♡ Save this person
+        </button>
+        {saveHinted && (
+          <p style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.5, marginBottom: 20 }}>
+            Saving the people you shop for is coming soon.
+          </p>
+        )}
 
         <div style={{ height: 1, background: '#16161e', marginBottom: 20 }} />
 
@@ -1519,7 +1568,8 @@ export default function GiftFinderWizard() {
             {step === 'loading' && loadingSkeleton}
             {step === 'results' && resultsContent}
           </div>
-          {step === 'results' && pinColumn}
+          {/* Pinterest / Pin Preview is admin-only (logged in via shared password). */}
+          {step === 'results' && isAdmin && pinColumn}
         </div>
       )}
     </div>

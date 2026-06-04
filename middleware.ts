@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+// The gift finder (/app) is PUBLIC — anyone can use it without logging in.
+// The shared password now only gates the operator/admin pages (e.g. the
+// signups list). "Admin" everywhere else = simply holding a valid
+// strix-session cookie (see app/(app)/app/page.tsx). Pinterest / Pin Preview
+// are hidden for non-admins rather than redirected.
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
-
-  // Let the login page through — otherwise we'd get an infinite redirect loop
-  if (pathname === '/app/login') {
-    return NextResponse.next();
-  }
 
   const session      = req.cookies.get('strix-session')?.value ?? '';
   const sessionToken = process.env.AUTH_TOKEN ?? '';
 
-  // If no token configured yet, allow through (dev convenience)
+  // If no token configured yet, allow through (dev convenience).
   if (!sessionToken) {
     return NextResponse.next();
   }
@@ -26,5 +26,6 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/app/:path*'],
+  // Admin-only routes. The public wizard at /app is intentionally NOT matched.
+  matcher: ['/app/signups', '/app/signups/:path*'],
 };
