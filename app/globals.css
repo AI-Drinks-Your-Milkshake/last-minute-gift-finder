@@ -182,16 +182,24 @@ select option {
 }
 
 /* ── Gift card grid ───────────────────────────────────────────────────────── */
-/* Column count is driven by the --gift-cols custom property (set inline from
-   the density control). On phones we force a single column regardless, so cards
-   stay full-width and readable instead of cramped two-up. */
+/* Mobile-first column logic. The density control (--gift-cols) only applies at
+   desktop widths; below that we cap columns so cards never render cramped and
+   over-tall:
+     phones (incl. landscape, < 641px) → 1 column
+     tablets / small landscape (641–1023px) → 2 columns
+     desktop (≥ 1024px) → honor the density control (default 4)               */
 .gift-grid {
   display: grid;
-  grid-template-columns: repeat(var(--gift-cols, 2), minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 16px;
 }
-@media (max-width: 640px) {
+@media (min-width: 641px) {
   .gift-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1024px) {
+  .gift-grid {
+    grid-template-columns: repeat(var(--gift-cols, 4), minmax(0, 1fr));
   }
 }
