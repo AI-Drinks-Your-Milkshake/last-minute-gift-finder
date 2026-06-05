@@ -1622,13 +1622,23 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
   // ── Results content ────────────────────────────────────────────────────
 
   const resultsContent = (
-    <div className="px-5 py-6 sm:px-8 lg:px-10">
-      {/* Mobile filter strip */}
-      <div className="lg:hidden" style={{ marginBottom: 20 }}>
-        <p style={{ fontSize: 13, color: C.textPri, fontWeight: 500, marginBottom: 10 }}>
+    <div>
+      {/* Sticky mobile context bar — keeps who/age/occasion and the quick vibe
+          switcher pinned below the nav while scrolling the single-column list.
+          Full-bleed (lives outside the body padding) so its background covers
+          edge to edge as cards scroll underneath. */}
+      <div
+        className="lg:hidden"
+        style={{
+          position: 'sticky', top: 51, zIndex: 9,
+          background: C.bg, borderBottom: `1px solid #16161e`,
+          padding: '12px 20px',
+        }}
+      >
+        <p style={{ fontSize: 14, color: C.textPri, fontWeight: 600, marginBottom: 10, lineHeight: 1.3 }}>
           Gift ideas for {form.recipient}, {form.age} · {form.occasion}
         </p>
-        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8, scrollbarWidth: 'none' }}>
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', scrollbarWidth: 'none' }}>
           {VIBES.map(v => (
             <button key={v.value}
               onClick={() => setResultForm(prev => ({ ...prev, relatedness: v.value }))}
@@ -1645,6 +1655,8 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
         </div>
       </div>
 
+      {/* Body */}
+      <div className="px-5 py-6 sm:px-8 lg:px-10">
       {/* Desktop header */}
       <div className="hidden lg:flex" style={{ alignItems: 'baseline', gap: 12, marginBottom: 24 }}>
         <h2 style={{ fontSize: 18, fontWeight: 500, color: C.textPri }}>
@@ -1683,7 +1695,7 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
 
       {/* Trailing skeletons — signal more complete cards are still arriving */}
       {!imagesSettled && progress.emitted < progress.target && (
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`, gap: 16, marginTop: visibleThemes.length > 0 ? 16 : 0 }}>
+        <div className="gift-grid" style={{ ['--gift-cols' as string]: gridCols, marginTop: visibleThemes.length > 0 ? 16 : 0 } as React.CSSProperties}>
           {Array.from({ length: Math.min(gridCols, Math.max(1, progress.target - progress.emitted)) }).map((_, i) => (
             <div key={i} className="animate-pulse" style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 16, minHeight: 320 }} />
           ))}
@@ -1710,6 +1722,7 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
           <DevPanel />
         </div>
       )}
+      </div>
     </div>
   );
 

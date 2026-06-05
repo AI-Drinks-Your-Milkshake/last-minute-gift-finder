@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import type { GiftTheme } from '@/types';
 import GiftCard from './GiftCard';
 
@@ -48,7 +49,7 @@ export default function GiftThemeSection({ theme, cols = 2 }: Props) {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: 16 }}>
+      <div className="gift-grid" style={{ ['--gift-cols' as string]: cols } as React.CSSProperties}>
         {visibleGifts.map((gift, i) => (
           <GiftCard key={`${theme.id}-${i}`} gift={gift} />
         ))}

@@ -180,3 +180,18 @@ select option {
   0%, 100% { opacity: 0.45; }
   50%      { opacity: 1; }
 }
+
+/* ── Gift card grid ───────────────────────────────────────────────────────── */
+/* Column count is driven by the --gift-cols custom property (set inline from
+   the density control). On phones we force a single column regardless, so cards
+   stay full-width and readable instead of cramped two-up. */
+.gift-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--gift-cols, 2), minmax(0, 1fr));
+  gap: 16px;
+}
+@media (max-width: 640px) {
+  .gift-grid {
+    grid-template-columns: 1fr;
+  }
+}
