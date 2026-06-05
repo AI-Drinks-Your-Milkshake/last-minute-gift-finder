@@ -14,11 +14,6 @@ import { OCCASIONS, COMMON_OCCASIONS } from '@/lib/occasions';
 import { AESTHETICS, FEATURED_VIBE_VALUES } from '@/lib/aesthetics';
 import { selectThemesForDisplay, countGifts, flattenGifts } from '@/lib/select-gifts';
 
-const LEVELS: Array<{ value: SearchFormData['level']; label: string; desc: string }> = [
-  { value: 'casual',     label: 'Casual',     desc: 'Dabbles occasionally, not obsessive' },
-  { value: 'interested', label: 'Into it',    desc: 'Has some gear, regularly engaged' },
-  { value: 'enthusiast', label: 'Enthusiast', desc: 'Deep hobby, loves niche stuff' },
-];
 
 const VIBES: Array<{ value: SearchFormData['relatedness']; label: string; desc: string }> = [
   { value: 'similar',     label: 'Just like this', desc: 'Ideas that directly match their interests' },
@@ -547,7 +542,6 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
   // ── Slider index helpers ──
 
   const vibeIdx  = VIBES.findIndex(v => v.value === resultForm.relatedness);
-  const levelIdx = LEVELS.findIndex(l => l.value === resultForm.level);
 
   // ── Style helpers ──
 
@@ -790,13 +784,15 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
                 {v}
               </span>
             ))}
+            {form.interests && (
+              // Interest pill. Prefixed with the Turbo flame when the search ran
+              // in enthusiast depth (the depth slider was removed — Turbo is set
+              // in the wizard and shown here as a read-only indicator).
+              <span style={{ padding: '5px 10px', borderRadius: 20, fontSize: 12, background: C.textPri, color: C.bg, fontWeight: 500 }}>
+                {committedLevel === 'enthusiast' ? '🔥 ' : ''}{form.interests}
+              </span>
+            )}
           </div>
-          {form.interests && (
-            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 12px' }}>
-              <p style={{ fontSize: 11, color: C.textMuted, marginBottom: 4 }}>Interests</p>
-              <p style={{ fontSize: 12, color: C.textSec, lineHeight: 1.5 }}>{form.interests}</p>
-            </div>
-          )}
         </div>
 
         {/* Save this person — MVP placeholder (intentionally no-op). Reserves
@@ -935,28 +931,6 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
             {VIBES.map(v => (
               <span key={v.value} style={{ fontSize: 10, color: C.textMuted, textAlign: 'center', maxWidth: 60, lineHeight: 1.3 }}>
                 {v.label}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        {/* Depth of interest — slider */}
-        <div style={{ marginBottom: 22 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-            <p style={{ fontSize: 12, color: C.textSec }}>Depth of interest</p>
-            <span style={{ fontSize: 12, color: C.textPri, fontWeight: 500 }}>{LEVELS[levelIdx]?.label}</span>
-          </div>
-          <input
-            type="range" min={0} max={2} step={1}
-            value={levelIdx}
-            onChange={e => setResultForm(prev => ({ ...prev, level: LEVELS[Number(e.target.value)].value }))}
-            style={{ width: '100%', accentColor: C.accent }}
-            aria-label="Depth of interest"
-          />
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-            {LEVELS.map(l => (
-              <span key={l.value} style={{ fontSize: 10, color: C.textMuted, textAlign: 'center', maxWidth: 60, lineHeight: 1.3 }}>
-                {l.label}
               </span>
             ))}
           </div>
