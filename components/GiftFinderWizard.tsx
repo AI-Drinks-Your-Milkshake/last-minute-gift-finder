@@ -1612,21 +1612,18 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
         <p style={{ fontSize: 14, color: C.textPri, fontWeight: 600, marginBottom: 10, lineHeight: 1.3 }}>
           Gift ideas for {form.recipient}, {form.age} · {form.occasion}
         </p>
-        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', scrollbarWidth: 'none' }}>
-          {VIBES.map(v => (
-            <button key={v.value}
-              onClick={() => setResultForm(prev => ({ ...prev, relatedness: v.value }))}
-              style={{
-                padding: '4px 10px', borderRadius: 16, fontSize: 12, flexShrink: 0,
-                border:     `1px solid ${resultForm.relatedness === v.value ? '#44445a' : C.border}`,
-                background:  resultForm.relatedness === v.value ? '#22222e' : C.surface,
-                color:       resultForm.relatedness === v.value ? C.textPri : C.textSec,
-                cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit',
-              }}>
-              {v.label}
-            </button>
-          ))}
-        </div>
+        {form.interests && (
+          <div style={{ marginBottom: 10 }}>
+            <span style={{
+              display: 'inline-block', maxWidth: '100%', verticalAlign: 'bottom',
+              padding: '4px 10px', borderRadius: 16, fontSize: 12,
+              background: C.surface, border: `1px solid ${C.border}`, color: C.textSec,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {committedLevel === 'enthusiast' ? '🔥 ' : ''}{form.interests}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Body */}
