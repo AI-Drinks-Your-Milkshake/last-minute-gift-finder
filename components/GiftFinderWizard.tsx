@@ -601,7 +601,7 @@ export default function GiftFinderWizard({ isAdmin = false }: { isAdmin?: boolea
       </button>
 
       {isWizardStep && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="hidden sm:flex" style={{ alignItems: 'center', gap: 10 }}>
           <div style={{ width: 120, height: 2, background: '#22222e', borderRadius: 2, overflow: 'hidden' }}>
             <div style={{
               height: '100%', background: C.accent, borderRadius: 2,
